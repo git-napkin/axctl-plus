@@ -7,12 +7,14 @@ import (
 	"os"
 	"sync"
 
+	"axctl/pkg/config"
 	"axctl/pkg/ipc"
 )
 
 type Server struct {
 	compositor ipc.Compositor
 	socketPath string
+	ConfigPath string // path to TOML config file for on-demand re-apply
 	cache      *ipc.StateCache
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
@@ -504,6 +506,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.SetConfig(p.Key, p.Value)
+			if err == nil && s.ConfigPath != "" {
+				cfg, loadErr := config.LoadConfig(s.ConfigPath)
+				if loadErr == nil {
+					config.ApplyConfig(cfg, s.compositor)
+				}
+			}
 		case "Config.Apply":
 			var p struct {
 				Payload string `json:"payload"`

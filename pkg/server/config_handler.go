@@ -50,7 +50,7 @@ func DefaultOutputPath() string {
 	if homeDir == "" {
 		homeDir = "/root"
 	}
-	return filepath.Join(homeDir, ".local", "share", "ambxst", "hyprland.conf")
+	return filepath.Join(homeDir, ".local", "share", "ambxst+", "hyprland.conf")
 }
 
 func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {

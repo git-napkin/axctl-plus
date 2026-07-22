@@ -250,6 +250,7 @@ func runDaemon(customConfigPath string) {
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
 	}
+	srv.ConfigPath = configPath
 	if _, statErr := os.Stat(configPath); statErr == nil {
 		cfg, cfgErr := config.LoadConfig(configPath)
 		if cfgErr != nil {
