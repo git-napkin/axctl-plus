@@ -2,6 +2,7 @@ package hyprland
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"axctl/pkg/ipc"
@@ -395,7 +396,7 @@ func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
 			props = append(props, "no_shadow on")
 		}
 
-		matchStr := fmt.Sprintf("match:namespace %s", r.Namespace)
+		matchStr := fmt.Sprintf("match:namespace %s", regexp.QuoteMeta(r.Namespace))
 		props = append(props, matchStr)
 
 		out.WriteString("layerrule = " + strings.Join(props, ", ") + "\n\n")
