@@ -250,7 +250,20 @@ func runDaemon(customConfigPath string) {
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
 	}
-	srv.ConfigPath = configPath
+
+	reloadFromToml := func() {
+		cfg, loadErr := config.LoadConfig(configPath)
+		if loadErr != nil {
+			fmt.Printf("[axctl-config] Error reloading config: %v\n", loadErr)
+			return
+		}
+		if applyErr := config.ApplyConfig(cfg, comp); applyErr != nil {
+			fmt.Printf("[axctl-config] Error applying config: %v\n", applyErr)
+		}
+	}
+
+	srv.ConfigReloader = reloadFromToml
+
 	if _, statErr := os.Stat(configPath); statErr == nil {
 		cfg, cfgErr := config.LoadConfig(configPath)
 		if cfgErr != nil {

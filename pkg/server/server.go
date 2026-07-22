@@ -7,18 +7,21 @@ import (
 	"os"
 	"sync"
 
-	"axctl/pkg/config"
 	"axctl/pkg/ipc"
 )
 
 type Server struct {
 	compositor ipc.Compositor
 	socketPath string
-	ConfigPath string // path to TOML config file for on-demand re-apply
 	cache      *ipc.StateCache
 	clients    map[net.Conn]struct{}
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
+
+	// ConfigReloader is called after Config.Set to re-apply the TOML file,
+	// regenerating generated config and calling ReloadConfig.
+	// Set by main.go to avoid circular import (server → config → server).
+	ConfigReloader func()
 }
 
 func New(c ipc.Compositor, path string) *Server {
@@ -506,11 +509,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 				break
 			}
 			err = s.compositor.SetConfig(p.Key, p.Value)
-			if err == nil && s.ConfigPath != "" {
-				cfg, loadErr := config.LoadConfig(s.ConfigPath)
-				if loadErr == nil {
-					config.ApplyConfig(cfg, s.compositor)
-				}
+			if err == nil && s.ConfigReloader != nil {
+				s.ConfigReloader()
 			}
 		case "Config.Apply":
 			var p struct {
