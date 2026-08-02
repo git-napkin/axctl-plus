@@ -640,10 +640,74 @@ func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
 	return err
 }
 
+// keybindKeyString renders modifiers + key in the Lua config syntax
+// ("MODS + KEY", e.g. "SUPER + Q"); bare key with no modifiers.
+func keybindKeyString(mods []string, key string) string {
+	joined := strings.Join(mods, " + ")
+	if joined == "" {
+		return key
+	}
+	return joined + " + " + key
+}
+
+// bindToLua renders one hl.bind(...) expression for a keybind.
+func bindToLua(b ipc.Keybind) string {
+	keyStr := keybindKeyString(b.Modifiers, b.Key)
+
+	dispatcher := b.Dispatcher
+	if dispatcher == "" || dispatcher == "exec" {
+		dispatcher = fmt.Sprintf("hl.dsp.exec_cmd(%q)", b.Argument)
+	} else {
+		dispatcher = dispatcherToLua(dispatcher, b.Argument)
+	}
+
+	var opts []string
+	if flags := bindFlagsToLua(b.Flags); flags != "" {
+		opts = append(opts, flags)
+	}
+	if strings.HasPrefix(strings.ToLower(b.Key), "mouse:") {
+		opts = append(opts, "mouse = true")
+	}
+	if len(opts) == 0 {
+		return fmt.Sprintf("hl.bind(%q, %s)", keyStr, dispatcher)
+	}
+	return fmt.Sprintf("hl.bind(%q, %s, { %s })", keyStr, dispatcher, strings.Join(opts, ", "))
+}
+
+// dispatchLuaFunction runs a Lua body through the text socket. On Hyprland
+// >= 0.55 the socket compiles `dispatch <args>` as `return hl.dispatch(...)`,
+// so passing a function executes it (the pre-0.55 `keyword`/`[[BATCH]]`
+// commands no longer exist there).
+func (h *Hyprland) dispatchLuaFunction(body string) (string, error) {
+	return h.dispatch("dispatch function() " + body + " end")
+}
+
 func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 	var payload ipc.BatchKeybindsPayload
 	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {
 		return fmt.Errorf("invalid keybinds payload: %w", err)
+	}
+
+	if h.supportsLuaDispatchers() {
+		var body strings.Builder
+
+		// Process unbinds first
+		for _, u := range payload.Unbinds {
+			body.WriteString(fmt.Sprintf("pcall(function() hl.unbind(%q) end);",
+				keybindKeyString(u.Modifiers, u.Key)))
+		}
+
+		// Process binds
+		for _, b := range payload.Binds {
+			body.WriteString("pcall(function() " + bindToLua(b) + " end);")
+		}
+
+		if body.Len() == 0 {
+			return nil
+		}
+
+		_, err := h.dispatchLuaFunction(body.String())
+		return err
 	}
 
 	var cmds []string
@@ -709,13 +773,82 @@ func (h *Hyprland) GetCursorPosition() (int, int, error) {
 }
 
 func (h *Hyprland) BindKey(mods, key, command string) error {
+	if h.supportsLuaDispatchers() {
+		dispatcher, arg := command, ""
+		if i := strings.IndexByte(command, ','); i != -1 {
+			dispatcher, arg = command[:i], command[i+1:]
+		}
+		kb := ipc.Keybind{
+			Modifiers:  []string{mods},
+			Key:        key,
+			Dispatcher: strings.TrimSpace(dispatcher),
+			Argument:   strings.TrimSpace(arg),
+			Enabled:    true,
+		}
+		_, err := h.dispatchLuaFunction(bindToLua(kb))
+		return err
+	}
 	_, err := h.dispatch(fmt.Sprintf("keyword bind %s,%s,%s", mods, key, command))
 	return err
 }
 
 func (h *Hyprland) UnbindKey(mods, key string) error {
+	if h.supportsLuaDispatchers() {
+		_, err := h.dispatchLuaFunction(fmt.Sprintf("hl.unbind(%q)", keybindKeyString([]string{mods}, key)))
+		return err
+	}
 	_, err := h.dispatch(fmt.Sprintf("keyword unbind %s,%s", mods, key))
 	return err
+}
+
+// hyprKeyToLuaTable converts a "general:col.active_border" style key into a
+// nested hl.config table ({ general = { col = { ["active_border"] = v } } }).
+func hyprKeyToLuaTable(hyprKey string, value interface{}) (string, error) {
+	var luaValue string
+	switch v := value.(type) {
+	case string:
+		switch strings.ToLower(v) {
+		case "true", "false":
+			luaValue = strings.ToLower(v)
+		default:
+			if n, err := strconv.ParseFloat(v, 64); err == nil {
+				luaValue = fmt.Sprintf("%g", n)
+			} else {
+				luaValue = fmt.Sprintf("%q", v)
+			}
+		}
+	case bool:
+		luaValue = fmt.Sprintf("%t", v)
+	case float64:
+		luaValue = fmt.Sprintf("%g", v)
+	case int:
+		luaValue = strconv.Itoa(v)
+	default:
+		return "", fmt.Errorf("unsupported config value type %T", value)
+	}
+
+	parts := strings.FieldsFunc(hyprKey, func(r rune) bool { return r == ':' || r == '.' })
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty config key %q", hyprKey)
+	}
+
+	expr := luaValue
+	for i := len(parts) - 1; i > 0; i-- {
+		expr = fmt.Sprintf("{ %s = %s }", luaIdent(parts[i]), expr)
+	}
+	return expr, nil
+}
+
+func luaIdent(s string) string {
+	if s == "" || (s[0] >= '0' && s[0] <= '9') || strings.ContainsAny(s, "-.") {
+		return fmt.Sprintf("[%q]", s)
+	}
+	for _, r := range s {
+		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return fmt.Sprintf("[%q]", s)
+		}
+	}
+	return s
 }
 
 func (h *Hyprland) SetConfig(key string, value interface{}) error {
@@ -735,6 +868,15 @@ func (h *Hyprland) SetConfig(key string, value interface{}) error {
 	hyprKey, ok := mapping[key]
 	if !ok {
 		hyprKey = key
+	}
+
+	if h.supportsLuaDispatchers() {
+		table, err := hyprKeyToLuaTable(hyprKey, value)
+		if err != nil {
+			return err
+		}
+		_, err = h.dispatchLuaFunction(fmt.Sprintf("hl.config(%s)", table))
+		return err
 	}
 
 	_, err := h.dispatch(fmt.Sprintf("keyword %s %v", hyprKey, value))
