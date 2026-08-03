@@ -6,6 +6,7 @@ type Window struct {
 	AppID        string                 `json:"app_id"`
 	WorkspaceID  string                 `json:"workspace_id"`
 	IsFocused    bool                   `json:"is_focused"`
+	IsUrgent     bool                   `json:"is_urgent"`
 	IsFloating   bool                   `json:"is_floating"`
 	IsFullscreen bool                   `json:"is_fullscreen"`
 	IsHidden     bool                   `json:"is_hidden"`
@@ -52,6 +53,8 @@ const (
 	EventWindowClosed EventType = "window_closed"
 	// EventWindowFocused is fired when a window gains focus.
 	EventWindowFocused EventType = "window_focused"
+	// EventWindowUrgent is fired when a window's urgent (demands attention) state changes.
+	EventWindowUrgent EventType = "window_urgent"
 	// EventWindowTitleChanged is fired when a window's title changes.
 	EventWindowTitleChanged EventType = "window_title_changed"
 	// EventWindowMoved is fired when a window is moved to another workspace.

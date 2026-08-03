@@ -127,6 +127,15 @@ func (s *Server) watchEvents() {
 				}
 			}
 			s.broadcastEvent("Event.WindowTitleChanged", e.Payload)
+		case ipc.EventWindowUrgent:
+			if addr, ok := e.Payload["address"].(string); ok {
+				urgent, _ := e.Payload["urgent"].(bool)
+				s.cache.UpdateWindowUrgent(addr, urgent)
+				s.broadcastEvent("Event.WindowUrgent", map[string]interface{}{
+					"address": addr,
+					"urgent":  urgent,
+				})
+			}
 		case ipc.EventWorkspaceChanged:
 			s.initCache()
 			if name, ok := e.Payload["name"].(string); ok {

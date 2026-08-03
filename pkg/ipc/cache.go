@@ -117,6 +117,21 @@ func (c *StateCache) MarkWindowFocused(id string) {
 	defer c.mu.Unlock()
 	for i := range c.windows {
 		c.windows[i].IsFocused = (c.windows[i].ID == id)
+		// Giving the window focus satisfies its attention request.
+		if c.windows[i].ID == id {
+			c.windows[i].IsUrgent = false
+		}
+	}
+}
+
+func (c *StateCache) UpdateWindowUrgent(id string, urgent bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.windows {
+		if c.windows[i].ID == id {
+			c.windows[i].IsUrgent = urgent
+			break
+		}
 	}
 }
 

@@ -54,6 +54,30 @@ func TestIsHyprlandVersionAtLeast055(t *testing.T) {
 	}
 }
 
+func TestParseUrgentPayload(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    string
+		wantUrg bool
+	}{
+		{name: "bare address", payload: "60bdfc709e70", want: "0x60bdfc709e70", wantUrg: true},
+		{name: "bare address with 0x", payload: "0x60bdfc709e70", want: "0x60bdfc709e70", wantUrg: true},
+		{name: "state urgent", payload: "1,0x60bdfc709e70", want: "0x60bdfc709e70", wantUrg: true},
+		{name: "state clear", payload: "0,0x60bdfc709e70", want: "0x60bdfc709e70", wantUrg: false},
+		{name: "state urgent without 0x", payload: "1,60bdfc709e70", want: "0x60bdfc709e70", wantUrg: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotUrg := parseUrgentPayload(tt.payload)
+			if got != tt.want || gotUrg != tt.wantUrg {
+				t.Fatalf("parseUrgentPayload(%q) = (%q, %v), want (%q, %v)", tt.payload, got, gotUrg, tt.want, tt.wantUrg)
+			}
+		})
+	}
+}
+
 func TestDispatchVersionedRetriesAfterVersionParseFailure(t *testing.T) {
 	commands := runFakeHyprlandSocket(t, []string{`{}`, `{"version":"0.55.0"}`})
 	h := &Hyprland{signature: "test"}

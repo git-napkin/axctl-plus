@@ -215,6 +215,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		Fullscreen int    `json:"fullscreen"`
 		Pinned     bool   `json:"pinned"`
 		Monitor    int    `json:"monitor"`
+		Urgent     bool   `json:"urgent"`
 		At         []int  `json:"at"`
 		Size       []int  `json:"size"`
 		Workspace  struct {
@@ -235,6 +236,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			AppID:        c.Class,
 			WorkspaceID:  fmt.Sprintf("%d", c.Workspace.ID),
 			IsFocused:    false, // Will be updated if active
+			IsUrgent:     c.Urgent,
 			IsFloating:   c.Floating,
 			IsFullscreen: c.Fullscreen != 0,
 			IsHidden:     false,
@@ -991,6 +993,11 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 			case "windowtitle":
 				event.Type = ipc.EventWindowTitleChanged
 				event.Payload["address"] = "0x" + parts[1]
+			case "urgent":
+				event.Type = ipc.EventWindowUrgent
+				addr, urgent := parseUrgentPayload(parts[1])
+				event.Payload["address"] = addr
+				event.Payload["urgent"] = urgent
 			}
 
 			if event.Type != "" || len(event.Payload) > 0 {
@@ -1000,6 +1007,22 @@ func (h *Hyprland) Subscribe() (<-chan ipc.Event, error) {
 	}()
 
 	return ch, nil
+}
+
+// parseUrgentPayload normalizes the payload of Hyprland's "urgent" socket2
+// event into a window address (with "0x" prefix) and the urgent state.
+// Newer Hyprland versions prefix the address with the urgency state
+// ("1,0xADDR" / "0,0xADDR"); older versions send just the address, which the
+// event only carries on transitions to urgent.
+func parseUrgentPayload(payload string) (address string, urgent bool) {
+	p := strings.TrimSpace(payload)
+	if idx := strings.IndexByte(p, ','); idx != -1 {
+		state, addr := strings.TrimSpace(p[:idx]), strings.TrimSpace(p[idx+1:])
+		urgent = state == "1"
+		address = "0x" + strings.TrimPrefix(addr, "0x")
+		return address, urgent
+	}
+	return "0x" + strings.TrimPrefix(p, "0x"), true
 }
 
 func (h *Hyprland) SwitchKeyboardLayout(action string) error {
