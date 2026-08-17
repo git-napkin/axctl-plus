@@ -221,6 +221,8 @@ func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
 		bindKw := "bind"
 		if strings.HasPrefix(strings.ToLower(kb.Key), "mouse:") {
 			bindKw = "bindm"
+		} else if flagStr := strings.ReplaceAll(kb.Flags, "m", ""); flagStr != "" {
+			bindKw = "bind" + flagStr
 		}
 
 		mod = strings.ReplaceAll(mod, "SUPER", "SUPER")
