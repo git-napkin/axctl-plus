@@ -238,7 +238,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			IsFocused:    false, // Will be updated if active
 			IsUrgent:     c.Urgent,
 			IsFloating:   c.Floating,
-			IsFullscreen: c.Fullscreen != 0,
+			IsFullscreen: c.Fullscreen == 2,
 			IsHidden:     false,
 			Metadata: map[string]interface{}{
 				"monitor_id": fmt.Sprintf("%d", c.Monitor),
