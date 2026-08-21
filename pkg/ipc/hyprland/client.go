@@ -690,26 +690,75 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 		return fmt.Errorf("invalid keybinds payload: %w", err)
 	}
 
-	if h.supportsLuaDispatchers() {
-		var body strings.Builder
+	// Debug log – always, so we can diagnose total-failure reports.
+	// Best-effort: ignore log errors.
+	func() {
+		f, err := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "[%s] BatchKeybinds payload: %d binds, %d unbinds, lua=%v\n",
+			time.Now().Format(time.RFC3339), len(payload.Binds), len(payload.Unbinds), h.supportsLuaDispatchers())
+		// Truncate payload for log if huge
+		if len(jsonPayload) < 8192 {
+			fmt.Fprintf(f, "  payload: %s\n", jsonPayload)
+		} else {
+			fmt.Fprintf(f, "  payload: %d bytes\n", len(jsonPayload))
+		}
+	}()
 
-		// Process unbinds first
+	// Try Lua path first – current Hyprland (>=0.55) requires it. The
+	// supportsLuaDispatchers() check is advisory; if the dispatch socket is
+	// temporarily unavailable it returns false and would incorrectly force the
+	// legacy [[BATCH]] path which no longer exists on 0.56+. So we try Lua
+	// first and fall back only on dispatch error.
+	var luaBody string
+	{
+		var body strings.Builder
 		for _, u := range payload.Unbinds {
 			body.WriteString(fmt.Sprintf("pcall(function() hl.unbind(%q) end);",
 				keybindKeyString(u.Modifiers, u.Key)))
 		}
-
-		// Process binds
 		for _, b := range payload.Binds {
 			body.WriteString("pcall(function() " + bindToLua(b) + " end);")
 		}
+		luaBody = body.String()
+	}
 
-		if body.Len() == 0 {
-			return nil
+	if luaBody != "" {
+		// Prefer Lua when version says so, but also try it even when version
+		// detection failed – the fallback will handle the error.
+		shouldTryLua := h.supportsLuaDispatchers()
+		// Always try Lua first on modern Hyprland; if version detection said
+		// false (e.g. transient socket error), still attempt Lua and fall back.
+		if shouldTryLua || true {
+			_, err := h.dispatchLuaFunction(luaBody)
+			func() {
+				f, _ := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if f == nil {
+					return
+				}
+				defer f.Close()
+				if err != nil {
+					fmt.Fprintf(f, "[%s] Lua dispatch error: %v\n", time.Now().Format(time.RFC3339), err)
+					fmt.Fprintf(f, "  lua body: %s\n", luaBody)
+				} else {
+					fmt.Fprintf(f, "[%s] Lua dispatch ok: %d binds, %d unbinds\n", time.Now().Format(time.RFC3339), len(payload.Binds), len(payload.Unbinds))
+				}
+			}()
+			if err == nil {
+				return nil
+			}
+			// If Lua failed with "unknown request" / "keyword" / "error:" it may be
+			// an old Hyprland that doesn't understand Lua – fall through to
+			// legacy. For other errors (socket not found etc.) propagate.
+			if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "keyword") && !strings.Contains(strings.ToLower(err.Error()), "error:") {
+				return err
+			}
+			// Fall through to legacy on fallback-eligible errors
+			fmt.Printf("[axctl] Lua BatchKeybinds failed (%v), falling back to legacy [[BATCH]]\n", err)
 		}
-
-		_, err := h.dispatchLuaFunction(body.String())
-		return err
 	}
 
 	var cmds []string
@@ -739,6 +788,19 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 	}
 
 	_, err := h.dispatch("[[BATCH]]" + strings.Join(cmds, ";"))
+	func() {
+		f, _ := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if f == nil {
+			return
+		}
+		defer f.Close()
+		if err != nil {
+			fmt.Fprintf(f, "[%s] Legacy batch dispatch error: %v\n", time.Now().Format(time.RFC3339), err)
+			fmt.Fprintf(f, "  cmds: %s\n", strings.Join(cmds, ";"))
+		} else {
+			fmt.Fprintf(f, "[%s] Legacy batch dispatch ok: %d cmds\n", time.Now().Format(time.RFC3339), len(cmds))
+		}
+	}()
 	return err
 }
 
