@@ -2,7 +2,6 @@ package ipc
 
 import "fmt"
 
-// Error is the base error type for IPC operations.
 type Error struct {
 	Code    string
 	Message string
@@ -20,7 +19,6 @@ func (e *Error) Unwrap() error {
 	return e.Err
 }
 
-// Standard error definitions
 var (
 	ErrWindowNotFound = &Error{
 		Code:    "WINDOW_NOT_FOUND",
@@ -34,17 +32,8 @@ var (
 		Code:    "COMPOSITOR_NOT_AVAILABLE",
 		Message: "compositor is not available or not running",
 	}
-	ErrSubscriptionFailed = &Error{
-		Code:    "SUBSCRIPTION_FAILED",
-		Message: "failed to subscribe to compositor events",
-	}
-	ErrOperationFailed = &Error{
-		Code:    "OPERATION_FAILED",
-		Message: "operation failed",
-	}
 )
 
-// NewError creates a new IPC error with the given code and message.
 func NewError(code, message string, err error) *Error {
 	return &Error{
 		Code:    code,

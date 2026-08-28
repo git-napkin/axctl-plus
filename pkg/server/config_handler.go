@@ -1,14 +1,15 @@
 package server
 
 import (
-	"axctl/pkg/ipc"
-	"axctl/pkg/ipc/hyprland"
-	"axctl/pkg/ipc/mango"
-	"axctl/pkg/ipc/niri"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"axctl/pkg/ipc"
+	"axctl/pkg/ipc/hyprland"
+	"axctl/pkg/ipc/mango"
+	"axctl/pkg/ipc/niri"
 )
 
 type ConfigHandler struct {
@@ -33,24 +34,21 @@ func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHand
 		gen = &niri.Generator{}
 	case *mango.Mango:
 		gen = &mango.Generator{}
-	default:
-		gen = nil
 	}
 
-	resolvedPath := outputPath
-	if resolvedPath == "" {
-		resolvedPath = DefaultOutputPath()
+	if outputPath == "" {
+		outputPath = DefaultOutputPath()
 	}
 
-	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, outputPath: resolvedPath}
+	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, outputPath: outputPath}
 }
 
 func DefaultOutputPath() string {
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = "/root"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
 	}
-	return filepath.Join(homeDir, ".local", "share", "ambxst+", "hyprland.conf")
+	return filepath.Join(home, ".local", "share", "ambxst+", "hyprland.conf")
 }
 
 func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
@@ -66,7 +64,6 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		appStr = strings.TrimPrefix(appStr, "# ▄    ▄▄▄  ▄▄ ▄▄  ▄▄▄▄ ▄▄▄▄▄▄ ▄▄    \n#  ▀▄ ██▀██ ▀█▄█▀ ██▀▀▀   ██   ██    \n# ▄▀  ██▀██ ██ ██ ▀████   ██   ██▄▄▄ \n\n")
 	}
 
-	// Combine all generated config
 	var fullConfig strings.Builder
 	fullConfig.WriteString(startupStr)
 	if startupStr != "" {
@@ -80,7 +77,6 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	fullConfig.WriteString("\n")
 	fullConfig.WriteString(layerStr)
 
-	// Write .conf file
 	configPath := h.outputPath
 	if configPath == "" {
 		configPath = DefaultOutputPath()
@@ -96,7 +92,6 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	}
 	fmt.Printf("Config written to: %s\n", configPath)
 
-	// Write .lua file if Lua generator is available
 	if h.luaGen != nil {
 		luaStartup := h.luaGen.GenerateStartupLua(payload.Exec, payload.ExecOnce)
 		luaApp := h.luaGen.GenerateAppearanceLua(payload.Appearance)
@@ -124,10 +119,5 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 		fmt.Printf("Lua config written to: %s\n", luaPath)
 	}
 
-	fmt.Printf("Generated Appearance:\n%s\n", appStr)
-	fmt.Printf("Generated Keybinds:\n%s\n", bindStr)
-	fmt.Printf("Generated Window Rules:\n%s\n", rulesStr)
-	fmt.Printf("Generated Layer Rules:\n%s\n", layerStr)
-	// Finally trigger a reload
 	return h.compositor.ReloadConfig()
 }

@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -f /etc/os-release ]]; then
-	. /etc/os-release
-	if [[ "${ID:-}" == "nixos" || "${NAME:-}" == "NixOS" ]]; then
-		if command -v nix >/dev/null 2>&1; then
-			echo "NixOS detected; installing via nix profile."
-			nix profile add github:Axenide/axctl
-			exit 0
-		fi
-		echo "NixOS detected but nix command is unavailable."
-		exit 1
+is_nixos() {
+	[[ -f /etc/NIXOS ]] && return 0
+	if [[ -f /etc/os-release ]]; then
+		# shellcheck disable=SC1091
+		. /etc/os-release
+		[[ "${ID:-}" == "nixos" || "${NAME:-}" == "NixOS" ]]
 	fi
-fi
+}
 
-if [[ -f /etc/NIXOS ]]; then
+if is_nixos; then
 	if command -v nix >/dev/null 2>&1; then
 		echo "NixOS detected; installing via nix profile."
 		nix profile add github:Axenide/axctl
@@ -51,15 +47,18 @@ armv7l | armv7 | armv6l)
 	;;
 esac
 
-release_api="https://api.github.com/repos/Axenide/axctl/releases/latest"
-latest_tag="$(curl -fsL "$release_api" | grep -E '"tag_name"\s*:' | head -n1 | sed -E 's/.*"tag_name"\s*:\s*"([^"]+)".*/\1/')"
-if [[ -z "$latest_tag" ]]; then
+latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/Axenide/axctl/releases/latest)"
+latest_tag="${latest_url##*/}"
+if [[ -z "$latest_tag" || "$latest_tag" == "latest" ]]; then
 	echo "Unable to determine latest release tag."
 	exit 1
 fi
 
 normalize_version() {
-	echo "$1" | sed -E 's/^v//' | grep -Eo '[0-9]+(\.[0-9]+)*' | head -n1 || true
+	local s="${1#v}"
+	if [[ "$s" =~ ([0-9]+(\.[0-9]+)*) ]]; then
+		printf '%s\n' "${BASH_REMATCH[1]}"
+	fi
 }
 
 latest_version="$(normalize_version "$latest_tag")"
@@ -71,15 +70,13 @@ fi
 if command -v axctl >/dev/null 2>&1; then
 	current_raw="$(axctl --version 2>/dev/null || true)"
 	current_version="$(normalize_version "$current_raw")"
-	if [[ -n "$current_version" ]]; then
-		if [[ "$(printf '%s\n%s\n' "$current_version" "$latest_version" | sort -V | head -n1)" == "$latest_version" ]]; then
-			echo "already up to date ($current_version)"
-			exit 0
-		fi
+	if [[ -n "$current_version" && "$(printf '%s\n%s\n' "$current_version" "$latest_version" | sort -V | head -n1)" == "$latest_version" ]]; then
+		echo "already up to date ($current_version)"
+		exit 0
 	fi
 fi
 
-url="https://github.com/Axenide/axctl/releases/download/${latest_tag}/${asset}"
+url="https://github.com/Axenide/axctl/releases/latest/download/${asset}"
 tmp="$(mktemp)"
 
 cleanup() {

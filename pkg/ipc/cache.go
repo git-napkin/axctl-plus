@@ -82,10 +82,23 @@ func (c *StateCache) SetWindows(w []Window) {
 	c.windows = w
 }
 
+func (c *StateCache) HasWindow(id string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, w := range c.windows {
+		if w.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *StateCache) GetWindows() []Window {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.windows
+	out := make([]Window, len(c.windows))
+	copy(out, c.windows)
+	return out
 }
 
 func (c *StateCache) SetWorkspaces(w []Workspace) {
@@ -97,7 +110,9 @@ func (c *StateCache) SetWorkspaces(w []Workspace) {
 func (c *StateCache) GetWorkspaces() []Workspace {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.workspaces
+	out := make([]Workspace, len(c.workspaces))
+	copy(out, c.workspaces)
+	return out
 }
 
 func (c *StateCache) SetMonitors(m []Monitor) {
@@ -109,15 +124,16 @@ func (c *StateCache) SetMonitors(m []Monitor) {
 func (c *StateCache) GetMonitors() []Monitor {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.monitors
+	out := make([]Monitor, len(c.monitors))
+	copy(out, c.monitors)
+	return out
 }
 
 func (c *StateCache) MarkWindowFocused(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i := range c.windows {
-		c.windows[i].IsFocused = (c.windows[i].ID == id)
-		// Giving the window focus satisfies its attention request.
+		c.windows[i].IsFocused = c.windows[i].ID == id
 		if c.windows[i].ID == id {
 			c.windows[i].IsUrgent = false
 		}

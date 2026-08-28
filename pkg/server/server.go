@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 
 	"axctl/pkg/ipc"
@@ -18,9 +19,8 @@ type Server struct {
 	clientsMu  sync.RWMutex
 	idleMgr    *IdleManager
 
-	// ConfigReloader is called after Config.Set to re-apply the TOML file,
-	// regenerating generated config and calling ReloadConfig.
-	// Set by main.go to avoid circular import (server → config → server).
+	// ConfigReloader re-applies the TOML file after Config.Set.
+	// Set by main.go to avoid a server → config → server import cycle.
 	ConfigReloader func()
 }
 
@@ -81,47 +81,20 @@ func (s *Server) watchEvents() {
 				s.broadcastEvent("Event.WindowCreated", e.Window)
 			}
 		case ipc.EventWindowClosed:
-			if id, ok := e.Payload["address"].(string); ok {
+			if id := eventID(e.Payload); id != "" {
 				s.cache.RemoveWindow(id)
 				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": id})
-			} else if id, ok := e.Payload["id"].(string); ok {
-				s.cache.RemoveWindow(id)
-				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": id})
-			} else if id, ok := e.Payload["id"].(int); ok {
-				strID := fmt.Sprintf("%d", id)
-				s.cache.RemoveWindow(strID)
-				s.broadcastEvent("Event.WindowClosed", map[string]string{"ID": strID})
 			}
 		case ipc.EventWindowFocused:
-			// Mark focus in cache BEFORE broadcasting
 			if addr, ok := e.Payload["address"].(string); ok {
 				s.cache.MarkWindowFocused(addr)
 			}
-			// Track window in cache if not already present (helps Mango accumulate windows)
-			if e.Window != nil && e.Window.ID != "" {
-				existing := s.cache.GetWindows()
-				found := false
-				for _, w := range existing {
-					if w.ID == e.Window.ID {
-						found = true
-						break
-					}
-				}
-				if !found {
-					s.cache.AddWindow(*e.Window)
-				}
+			if e.Window != nil && e.Window.ID != "" && !s.cache.HasWindow(e.Window.ID) {
+				s.cache.AddWindow(*e.Window)
 			}
 			s.broadcastEvent("Event.WindowFocused", e.Payload)
 		case ipc.EventWindowTitleChanged:
-			var id string
-			if addr, ok := e.Payload["address"].(string); ok {
-				id = addr
-			} else if idStr, ok := e.Payload["id"].(string); ok {
-				id = idStr
-			} else if idInt, ok := e.Payload["id"].(int); ok {
-				id = fmt.Sprintf("%d", idInt)
-			}
-			if id != "" {
+			if id := eventID(e.Payload); id != "" {
 				if title, ok := e.Payload["title"].(string); ok {
 					s.cache.UpdateWindowTitle(id, title)
 				}
@@ -144,15 +117,7 @@ func (s *Server) watchEvents() {
 				s.broadcastEvent("Event.WorkspaceChanged", e.Payload)
 			}
 		case ipc.EventWindowMoved:
-			var id string
-			if addr, ok := e.Payload["address"].(string); ok {
-				id = addr
-			} else if idStr, ok := e.Payload["id"].(string); ok {
-				id = idStr
-			} else if idInt, ok := e.Payload["id"].(int); ok {
-				id = fmt.Sprintf("%d", idInt)
-			}
-			if id != "" {
+			if id := eventID(e.Payload); id != "" {
 				if ws, ok := e.Payload["workspace"].(string); ok {
 					monitor, _ := e.Payload["monitor"].(string)
 					s.cache.UpdateWindowWorkspace(id, ws, monitor)
@@ -166,29 +131,14 @@ func (s *Server) watchEvents() {
 			s.initCache()
 			s.broadcastEvent("Event.ConfigReloaded", nil)
 		case ipc.EventFullscreenChanged:
-			var id string
-			if addr, ok := e.Payload["address"].(string); ok {
-				id = addr
-			} else if idStr, ok := e.Payload["id"].(string); ok {
-				id = idStr
-			} else if idInt, ok := e.Payload["id"].(int); ok {
-				id = fmt.Sprintf("%d", idInt)
-			}
-			if id != "" {
-				if fs, ok := e.Payload["fullscreen"].(bool); ok {
-					s.cache.UpdateWindowState(id, fs)
-				} else if fsStr, ok := e.Payload["fullscreen"].(string); ok {
-					s.cache.UpdateWindowState(id, fsStr == "true" || fsStr == "1")
-				} else if fsInt, ok := e.Payload["fullscreen"].(int); ok {
-					s.cache.UpdateWindowState(id, fsInt == 1)
-				}
+			if id := eventID(e.Payload); id != "" {
+				s.cache.UpdateWindowState(id, payloadBool(e.Payload, "fullscreen"))
 			}
 			s.broadcastEvent("Event.FullscreenChanged", e.Payload)
 		case ipc.EventFocusedMonitorChanged:
 			s.initCache()
 			s.broadcastEvent("Event.FocusedMonitorChanged", e.Payload)
 		default:
-			// Check if this is a floating mode change (has address + floating in payload)
 			if addr, ok := e.Payload["address"].(string); ok {
 				if floating, ok := e.Payload["floating"].(bool); ok {
 					s.cache.UpdateWindowFloating(addr, floating)
@@ -606,8 +556,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = map[string]int{"x": x, "y": y}
 			}
 		case "System.IdleInhibit":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -619,8 +568,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.Inhibit(p.On)
 		case "System.IdleWait":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -632,8 +580,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.WaitIdle(p.TimeoutMs)
 		case "System.ResumeWait":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -645,8 +592,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.WaitResume(p.TimeoutMs)
 		case "System.InputIdleWait":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -658,8 +604,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.WaitInputIdle(p.TimeoutMs)
 		case "System.InputResumeWait":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -671,8 +616,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.WaitInputResume(p.TimeoutMs)
 		case "System.IsIdle":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -685,25 +629,15 @@ func (s *Server) handleConnection(conn net.Conn) {
 			isIdle, e := s.idleMgr.IsIdle(p.TimeoutMs)
 			err = e
 			if err == nil {
-				if isIdle {
-					result = "true"
-				} else {
-					result = "false"
-				}
+				result = boolString(isIdle)
 			}
 		case "System.IsInhibited":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
-			if s.idleMgr.IsInhibited() {
-				result = "true"
-			} else {
-				result = "false"
-			}
+			result = boolString(s.idleMgr.IsInhibited())
 		case "System.IsInputIdle":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -716,15 +650,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 			isIdle, e := s.idleMgr.IsInputIdle(p.TimeoutMs)
 			err = e
 			if err == nil {
-				if isIdle {
-					result = "true"
-				} else {
-					result = "false"
-				}
+				result = boolString(isIdle)
 			}
 		case "System.IdleMonitorCreate":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -754,8 +683,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleMonitorUpdate":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -791,8 +719,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleMonitorGet":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -808,8 +735,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleMonitorDestroy":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -821,8 +747,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.DestroyIdleMonitor(p.ID)
 		case "System.IdleInhibitorCreate":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -842,8 +767,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleInhibitorSet":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -860,8 +784,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleInhibitorGet":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -877,8 +800,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				result = state
 			}
 		case "System.IdleInhibitorDestroy":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -890,8 +812,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.DestroyIdleInhibitor(p.ID)
 		case "System.InhibitSystem":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
 			var p struct {
@@ -903,44 +824,25 @@ func (s *Server) handleConnection(conn net.Conn) {
 			}
 			err = s.idleMgr.InhibitSystem(p.On)
 		case "System.IsSystemInhibited":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
+			if !s.requireIdle(&resp) {
 				break
 			}
-			if s.idleMgr.IsSystemInhibited() {
-				result = "true"
-			} else {
-				result = "false"
-			}
+			result = boolString(s.idleMgr.IsSystemInhibited())
 		case "System.AppInhibitCheck":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
-				break
-			}
 			var p struct {
 				Patterns []string `json:"patterns"`
 			}
-			if err := json.Unmarshal(req.Params, &p); err != nil {
-				resp.Error = fmt.Sprintf("invalid params: %v", err)
-				break
+			if len(req.Params) > 0 {
+				if err := json.Unmarshal(req.Params, &p); err != nil {
+					resp.Error = fmt.Sprintf("invalid params: %v", err)
+					break
+				}
 			}
-			matches, e := s.idleMgr.AppInhibitorCheck(p.Patterns)
-			err = e
-			if err == nil {
-				result = matches
-			}
-
+			result = AppInhibitorCheck(s.cache.GetWindows(), p.Patterns)
 		case "System.MediaInhibitCheck":
-			if s.idleMgr == nil {
-				resp.Error = "Idle management not supported on this session"
-				break
-			}
-			mediaResult, e := s.idleMgr.MediaInhibitorCheck()
-			err = e
-			if err == nil {
-				result = mediaResult
-			}
-
+			result, err = MediaInhibitorCheck()
+		case "System.GetCapabilities":
+			result, err = s.compositor.GetCapabilities()
 		case "System.Exit":
 			err = s.compositor.Exit()
 		case "System.SwitchKeyboardLayout":
@@ -1051,4 +953,49 @@ func (s *Server) handleIdleMonitorChanged(id uint32, isIdle bool) {
 		"is_idle": isIdle,
 	}
 	s.broadcastEvent("Event.IdleMonitorChanged", params)
+}
+
+func (s *Server) requireIdle(resp *Response) bool {
+	if s.idleMgr == nil {
+		resp.Error = "Idle management not supported on this session"
+		return false
+	}
+	return true
+}
+
+func eventID(payload map[string]interface{}) string {
+	if addr, ok := payload["address"].(string); ok {
+		return addr
+	}
+	if id, ok := payload["id"].(string); ok {
+		return id
+	}
+	switch id := payload["id"].(type) {
+	case int:
+		return strconv.Itoa(id)
+	case float64:
+		return strconv.Itoa(int(id))
+	}
+	return ""
+}
+
+func payloadBool(payload map[string]interface{}, key string) bool {
+	switch v := payload[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1"
+	case int:
+		return v == 1
+	case float64:
+		return v == 1
+	}
+	return false
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }

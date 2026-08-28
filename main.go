@@ -6,8 +6,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -36,8 +36,6 @@ func main() {
 	}
 
 	customConfigPath := ""
-
-	// Parse -c flag before command (only for daemon command)
 	i := 1
 	for i < len(os.Args) && os.Args[i] != "daemon" {
 		if os.Args[i] == "-c" && i+1 < len(os.Args) {
@@ -47,9 +45,11 @@ func main() {
 			break
 		}
 	}
-
-	// Shift args to remove parsed flags
 	remainingArgs := os.Args[i:]
+	if len(remainingArgs) == 0 {
+		usage()
+		return
+	}
 	switch remainingArgs[0] {
 	case "daemon":
 		runDaemon(customConfigPath)
@@ -160,91 +160,42 @@ func usage() {
 	fmt.Println("    exit                    Exit compositor")
 }
 
-func socketExists(path string) bool {
-	if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-		return true
-	}
-	return false
+func daemonSocketPath() string {
+	return fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
 }
 
-func findLatestSocket(pattern string) string {
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) == 0 {
-		return ""
+func detectCompositor() (ipc.Compositor, error) {
+	if c, err := hyprland.New(); err == nil {
+		return c, nil
 	}
-
-	// Filter out lock files
-	var filtered []string
-	for _, m := range matches {
-		if !strings.HasSuffix(m, ".lock") {
-			filtered = append(filtered, m)
-		}
+	if c, err := niri.New(); err == nil {
+		return c, nil
 	}
-	matches = filtered
-	if len(matches) == 0 {
-		return ""
+	if c, err := mango.New(); err == nil {
+		return c, nil
 	}
-
-	if len(matches) == 1 {
-		return matches[0]
-	}
-
-	var latest string
-	var latestTime int64
-	for _, m := range matches {
-		if fi, err := os.Stat(m); err == nil {
-			if fi.ModTime().UnixNano() > latestTime {
-				latestTime = fi.ModTime().UnixNano()
-				latest = m
-			}
-		}
-	}
-	if latest == "" {
-		return matches[0]
-	}
-	return latest
+	return nil, fmt.Errorf("no supported compositor detected")
 }
 
 func runDaemon(customConfigPath string) {
-	var comp ipc.Compositor
-	var err error
-
-	comp, err = hyprland.New()
-	if err == nil {
-		fmt.Println("Detected compositor:", comp)
-	} else {
-		comp, err = niri.New()
-		if err == nil {
-			fmt.Println("Detected compositor:", comp)
-		} else {
-			comp, err = mango.New()
-			if err == nil {
-				fmt.Println("Detected compositor:", comp)
-			} else {
-				fmt.Println("Error: no supported compositor detected")
-				os.Exit(1)
-			}
-		}
+	comp, err := detectCompositor()
+	if err != nil {
+		fmt.Println("Error:", err)
+		os.Exit(1)
 	}
-
 	fmt.Printf("Detected compositor: %T\n", comp)
-	fmt.Println("Creating server...")
 
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
-
-	// Single instance check
+	socketPath := daemonSocketPath()
 	if conn, err := net.Dial("unix", socketPath); err == nil {
 		conn.Close()
 		fmt.Println("Error: axctl daemon is already running.")
 		os.Exit(1)
 	}
-	os.Remove(socketPath) // Clean up stale socket if daemon is not running
+	os.Remove(socketPath)
 
 	srv := server.New(comp, socketPath)
-
 	fmt.Printf("Starting axctl daemon on %s\n", socketPath)
 
-	// Load TOML config if it exists
 	var cfgWatcher *config.ConfigWatcher
 	configPath := customConfigPath
 	if configPath == "" {
@@ -275,7 +226,6 @@ func runDaemon(customConfigPath string) {
 			}
 		}
 
-		// Watch for config changes
 		watcher, watchErr := config.NewConfigWatcher()
 		if watchErr != nil {
 			fmt.Printf("[axctl-config] Warning: could not start watcher: %v\n", watchErr)
@@ -310,7 +260,7 @@ func runDaemon(customConfigPath string) {
 }
 
 func runSubscribe() {
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	socketPath := daemonSocketPath()
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Error connecting to daemon: %v\n", err)
@@ -369,11 +319,8 @@ func handleRPC(category string, args []string) {
 		}
 	case "Window.Resize":
 		if len(args) > 2 {
-			var w, h int
-			fmt.Sscanf(args[1], "%d", &w)
-			fmt.Sscanf(args[2], "%d", &h)
-			params["width"] = w
-			params["height"] = h
+			params["width"] = parseInt(args[1])
+			params["height"] = parseInt(args[2])
 		}
 		if len(args) > 3 {
 			params["id"] = args[3]
@@ -421,11 +368,8 @@ func handleRPC(category string, args []string) {
 		}
 	case "Window.MovePixel":
 		if len(args) > 2 {
-			var x, y int
-			fmt.Sscanf(args[1], "%d", &x)
-			fmt.Sscanf(args[2], "%d", &y)
-			params["x"] = x
-			params["y"] = y
+			params["x"] = parseInt(args[1])
+			params["y"] = parseInt(args[2])
 		}
 		if len(args) > 3 {
 			params["id"] = args[3]
@@ -539,17 +483,11 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IdleWait", "System.ResumeWait", "System.IsIdle", "System.InputIdleWait", "System.InputResumeWait", "System.IsInputIdle":
 		if len(args) > 1 {
-			var ms int
-			fmt.Sscanf(args[1], "%d", &ms)
-			params["timeout_ms"] = ms
+			params["timeout_ms"] = parseInt(args[1])
 		}
-	case "System.IsInhibited":
-		// No args needed
 	case "System.IdleMonitorCreate":
 		if len(args) > 1 {
-			var ms int
-			fmt.Sscanf(args[1], "%d", &ms)
-			params["timeout_ms"] = ms
+			params["timeout_ms"] = parseInt(args[1])
 		}
 		if len(args) > 2 {
 			params["respect_inhibitors"] = args[2] == "1"
@@ -559,14 +497,10 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IdleMonitorUpdate":
 		if len(args) > 1 {
-			var id int
-			fmt.Sscanf(args[1], "%d", &id)
-			params["id"] = id
+			params["id"] = parseInt(args[1])
 		}
 		if len(args) > 2 {
-			var ms int
-			fmt.Sscanf(args[2], "%d", &ms)
-			params["timeout_ms"] = ms
+			params["timeout_ms"] = parseInt(args[2])
 		}
 		if len(args) > 3 {
 			params["respect_inhibitors"] = args[3] == "1"
@@ -576,9 +510,7 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IdleMonitorGet", "System.IdleMonitorDestroy":
 		if len(args) > 1 {
-			var id int
-			fmt.Sscanf(args[1], "%d", &id)
-			params["id"] = id
+			params["id"] = parseInt(args[1])
 		}
 	case "System.IdleInhibitorCreate":
 		if len(args) > 1 {
@@ -586,38 +518,24 @@ func handleRPC(category string, args []string) {
 		}
 	case "System.IdleInhibitorSet":
 		if len(args) > 2 {
-			var id int
-			fmt.Sscanf(args[1], "%d", &id)
-			params["id"] = id
+			params["id"] = parseInt(args[1])
 			params["enabled"] = args[2] == "1"
 		}
 	case "System.IdleInhibitorGet", "System.IdleInhibitorDestroy":
 		if len(args) > 1 {
-			var id int
-			fmt.Sscanf(args[1], "%d", &id)
-			params["id"] = id
+			params["id"] = parseInt(args[1])
 		}
 	case "System.InhibitSystem":
 		if len(args) > 1 {
 			params["on"] = args[1] == "1"
 		}
-	case "System.IsSystemInhibited":
-		// No args needed
 	case "System.AppInhibitCheck":
 		if len(args) > 1 {
-			var patterns []string
-			for i := 1; i < len(args); i++ {
-				patterns = append(patterns, args[i])
-			}
-			params["patterns"] = patterns
+			params["patterns"] = args[1:]
 		}
-	case "System.MediaInhibitCheck":
-		// No args needed - checks PulseAudio/PipeWire sink-inputs
-	case "System.Exit":
-		// No args needed - exits the compositor
 	}
 
-	socketPath := fmt.Sprintf("/tmp/axctl-%d.sock", os.Getuid())
+	socketPath := daemonSocketPath()
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Error connecting to daemon: %v\n", err)
@@ -652,15 +570,21 @@ func handleRPC(category string, args []string) {
 	fmt.Println(string(out))
 }
 
+func parseInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 func capitalize(s string) string {
-	if len(s) == 0 {
+	if s == "" {
 		return ""
 	}
 	parts := strings.Split(s, "-")
 	for i, p := range parts {
-		if len(p) > 0 {
-			parts[i] = fmt.Sprintf("%c%s", p[0]-32, p[1:])
+		if p == "" {
+			continue
 		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
 	}
 	return strings.Join(parts, "")
 }

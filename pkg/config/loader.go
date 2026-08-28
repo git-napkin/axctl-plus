@@ -10,20 +10,17 @@ import (
 
 const maxImportDepth = 10
 
-// DefaultConfigPath returns the resolved path to the axctl config file.
-// Checks $XDG_CONFIG_HOME/axctl/config.toml (or ~/.config/axctl/config.toml) first,
-// falls back to ~/.local/share/ambxst/axctl.toml.
 func DefaultConfigPath() string {
-	primaryPath := func() string {
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-			return filepath.Join(xdg, "axctl", "config.toml")
-		}
+	var primaryPath string
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		primaryPath = filepath.Join(xdg, "axctl", "config.toml")
+	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return filepath.Join(os.Getenv("HOME"), ".config", "axctl", "config.toml")
+			home = os.Getenv("HOME")
 		}
-		return filepath.Join(home, ".config", "axctl", "config.toml")
-	}()
+		primaryPath = filepath.Join(home, ".config", "axctl", "config.toml")
+	}
 
 	if _, err := os.Stat(primaryPath); err == nil {
 		return primaryPath
@@ -93,7 +90,6 @@ func collectIncludePaths(baseDir string, includes []string, visited map[string]b
 			visited[abs] = true
 			*out = append(*out, abs)
 
-			// Recurse into this file's includes
 			data, err := os.ReadFile(abs)
 			if err != nil {
 				continue
@@ -130,7 +126,6 @@ func loadRecursive(absPath string, visited map[string]bool, depth int) (*TOMLCon
 		return &cfg, nil
 	}
 
-	// Resolve includes relative to this file's directory
 	baseDir := filepath.Dir(absPath)
 	var merged TOMLConfig
 
@@ -159,7 +154,6 @@ func loadRecursive(absPath string, visited map[string]bool, depth int) (*TOMLCon
 		}
 	}
 
-	// Main file values override all includes
 	cfg.Include = nil
 	mergeConfig(&merged, &cfg)
 

@@ -175,6 +175,26 @@ func hyprTarget(id string) string {
 	return "address:" + id
 }
 
+var hyprConfigKeys = map[string]string{
+	"gaps.inner":            "general:gaps_in",
+	"gaps.outer":            "general:gaps_out",
+	"border.width":          "general:border_size",
+	"border.active_color":   "general:col.active_border",
+	"border.inactive_color": "general:col.inactive_border",
+	"opacity.active":        "decoration:active_opacity",
+	"opacity.inactive":      "decoration:inactive_opacity",
+	"blur.enabled":          "decoration:blur:enabled",
+	"blur.size":             "decoration:blur:size",
+	"blur.passes":           "decoration:blur:passes",
+}
+
+func mapHyprConfigKey(key string) string {
+	if mapped, ok := hyprConfigKeys[key]; ok {
+		return mapped
+	}
+	return key
+}
+
 func luaTargetField(id string) string {
 	if id == "" {
 		return ""
@@ -224,30 +244,32 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	if err := json.Unmarshal([]byte(resp), &clients); err != nil {
-		fmt.Printf("[Hyprland] Unmarshal error: %v | Raw: %s\n", err, resp)
 		return nil, err
 	}
 
 	windows := make([]ipc.Window, len(clients))
 	for i, c := range clients {
+		meta := map[string]interface{}{
+			"monitor_id": fmt.Sprintf("%d", c.Monitor),
+			"pinned":     c.Pinned,
+		}
+		if len(c.At) >= 2 {
+			meta["x"] = c.At[0]
+			meta["y"] = c.At[1]
+		}
+		if len(c.Size) >= 2 {
+			meta["width"] = c.Size[0]
+			meta["height"] = c.Size[1]
+		}
 		windows[i] = ipc.Window{
 			ID:           c.Address,
 			Title:        c.Title,
 			AppID:        c.Class,
 			WorkspaceID:  fmt.Sprintf("%d", c.Workspace.ID),
-			IsFocused:    false, // Will be updated if active
 			IsUrgent:     c.Urgent,
 			IsFloating:   c.Floating,
 			IsFullscreen: c.Fullscreen == 2,
-			IsHidden:     false,
-			Metadata: map[string]interface{}{
-				"monitor_id": fmt.Sprintf("%d", c.Monitor),
-				"pinned":     c.Pinned,
-				"x":          c.At[0],
-				"y":          c.At[1],
-				"width":      c.Size[0],
-				"height":     c.Size[1],
-			},
+			Metadata:     meta,
 		}
 	}
 	return windows, nil
@@ -433,7 +455,6 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 			Name:      w.Name,
 			MonitorID: w.Monitor,
 			IsActive:  w.ID == activeWS.ID,
-			IsEmpty:   false, // Not directly available from basic j/workspaces without parsing windows
 			Metadata: map[string]interface{}{
 				"focused": w.ID == activeWS.ID,
 			},
@@ -617,28 +638,10 @@ func (h *Hyprland) GetConfig(key string) (interface{}, error) {
 
 func (h *Hyprland) BatchConfig(configs map[string]interface{}) error {
 	var cmds []string
-
-	mapping := map[string]string{
-		"gaps.inner":            "general:gaps_in",
-		"gaps.outer":            "general:gaps_out",
-		"border.width":          "general:border_size",
-		"border.active_color":   "general:col.active_border",
-		"border.inactive_color": "general:col.inactive_border",
-		"opacity.active":        "decoration:active_opacity",
-		"opacity.inactive":      "decoration:inactive_opacity",
-		"blur.enabled":          "decoration:blur:enabled",
-		"blur.size":             "decoration:blur:size",
-		"blur.passes":           "decoration:blur:passes",
-	}
-
 	for k, v := range configs {
-		hyprKey := k
-		if mapped, ok := mapping[k]; ok {
-			hyprKey = mapped
-		}
-		cmds = append(cmds, fmt.Sprintf("keyword %s %v", hyprKey, v))
+		cmds = append(cmds, fmt.Sprintf("keyword %s %v", mapHyprConfigKey(k), v))
 	}
-	_, err := h.dispatch(fmt.Sprintf("[[BATCH]]%s", strings.Join(cmds, ";")))
+	_, err := h.dispatch("[[BATCH]]" + strings.Join(cmds, ";"))
 	return err
 }
 
@@ -690,86 +693,32 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 		return fmt.Errorf("invalid keybinds payload: %w", err)
 	}
 
-	// Debug log – always, so we can diagnose total-failure reports.
-	// Best-effort: ignore log errors.
-	func() {
-		f, err := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return
-		}
-		defer f.Close()
-		fmt.Fprintf(f, "[%s] BatchKeybinds payload: %d binds, %d unbinds, lua=%v\n",
-			time.Now().Format(time.RFC3339), len(payload.Binds), len(payload.Unbinds), h.supportsLuaDispatchers())
-		// Truncate payload for log if huge
-		if len(jsonPayload) < 8192 {
-			fmt.Fprintf(f, "  payload: %s\n", jsonPayload)
-		} else {
-			fmt.Fprintf(f, "  payload: %d bytes\n", len(jsonPayload))
-		}
-	}()
-
-	// Try Lua path first – current Hyprland (>=0.55) requires it. The
-	// supportsLuaDispatchers() check is advisory; if the dispatch socket is
-	// temporarily unavailable it returns false and would incorrectly force the
-	// legacy [[BATCH]] path which no longer exists on 0.56+. So we try Lua
-	// first and fall back only on dispatch error.
-	var luaBody string
-	{
-		var body strings.Builder
-		for _, u := range payload.Unbinds {
-			body.WriteString(fmt.Sprintf("pcall(function() hl.unbind(%q) end);",
-				keybindKeyString(u.Modifiers, u.Key)))
-		}
-		for _, b := range payload.Binds {
-			body.WriteString("pcall(function() " + bindToLua(b) + " end);")
-		}
-		luaBody = body.String()
+	var body strings.Builder
+	for _, u := range payload.Unbinds {
+		body.WriteString(fmt.Sprintf("pcall(function() hl.unbind(%q) end);",
+			keybindKeyString(u.Modifiers, u.Key)))
 	}
+	for _, b := range payload.Binds {
+		body.WriteString("pcall(function() " + bindToLua(b) + " end);")
+	}
+	luaBody := body.String()
 
 	if luaBody != "" {
-		// Prefer Lua when version says so, but also try it even when version
-		// detection failed – the fallback will handle the error.
-		shouldTryLua := h.supportsLuaDispatchers()
-		// Always try Lua first on modern Hyprland; if version detection said
-		// false (e.g. transient socket error), still attempt Lua and fall back.
-		if shouldTryLua || true {
-			_, err := h.dispatchLuaFunction(luaBody)
-			func() {
-				f, _ := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-				if f == nil {
-					return
-				}
-				defer f.Close()
-				if err != nil {
-					fmt.Fprintf(f, "[%s] Lua dispatch error: %v\n", time.Now().Format(time.RFC3339), err)
-					fmt.Fprintf(f, "  lua body: %s\n", luaBody)
-				} else {
-					fmt.Fprintf(f, "[%s] Lua dispatch ok: %d binds, %d unbinds\n", time.Now().Format(time.RFC3339), len(payload.Binds), len(payload.Unbinds))
-				}
-			}()
-			if err == nil {
-				return nil
-			}
-			// If Lua failed with "unknown request" / "keyword" / "error:" it may be
-			// an old Hyprland that doesn't understand Lua – fall through to
-			// legacy. For other errors (socket not found etc.) propagate.
-			if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "keyword") && !strings.Contains(strings.ToLower(err.Error()), "error:") {
-				return err
-			}
-			// Fall through to legacy on fallback-eligible errors
-			fmt.Printf("[axctl] Lua BatchKeybinds failed (%v), falling back to legacy [[BATCH]]\n", err)
+		_, err := h.dispatchLuaFunction(luaBody)
+		if err == nil {
+			return nil
+		}
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "unknown") && !strings.Contains(msg, "keyword") && !strings.Contains(msg, "error:") {
+			return err
 		}
 	}
 
 	var cmds []string
-
-	// Process unbinds first
 	for _, u := range payload.Unbinds {
 		mods := strings.Join(u.Modifiers, " ")
 		cmds = append(cmds, fmt.Sprintf("keyword unbind %s,%s", mods, u.Key))
 	}
-
-	// Process binds
 	for _, b := range payload.Binds {
 		mods := strings.Join(b.Modifiers, " ")
 		bindKeyword := "bind"
@@ -782,25 +731,10 @@ func (h *Hyprland) BatchKeybinds(jsonPayload string) error {
 			cmds = append(cmds, fmt.Sprintf("keyword %s %s,%s,%s,%s", bindKeyword, mods, b.Key, b.Dispatcher, b.Argument))
 		}
 	}
-
 	if len(cmds) == 0 {
 		return nil
 	}
-
 	_, err := h.dispatch("[[BATCH]]" + strings.Join(cmds, ";"))
-	func() {
-		f, _ := os.OpenFile("/tmp/axctl_batch.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if f == nil {
-			return
-		}
-		defer f.Close()
-		if err != nil {
-			fmt.Fprintf(f, "[%s] Legacy batch dispatch error: %v\n", time.Now().Format(time.RFC3339), err)
-			fmt.Fprintf(f, "  cmds: %s\n", strings.Join(cmds, ";"))
-		} else {
-			fmt.Fprintf(f, "[%s] Legacy batch dispatch ok: %d cmds\n", time.Now().Format(time.RFC3339), len(cmds))
-		}
-	}()
 	return err
 }
 
@@ -916,23 +850,7 @@ func luaIdent(s string) string {
 }
 
 func (h *Hyprland) SetConfig(key string, value interface{}) error {
-	mapping := map[string]string{
-		"gaps.inner":            "general:gaps_in",
-		"gaps.outer":            "general:gaps_out",
-		"border.width":          "general:border_size",
-		"border.active_color":   "general:col.active_border",
-		"border.inactive_color": "general:col.inactive_border",
-		"opacity.active":        "decoration:active_opacity",
-		"opacity.inactive":      "decoration:inactive_opacity",
-		"blur.enabled":          "decoration:blur:enabled",
-		"blur.size":             "decoration:blur:size",
-		"blur.passes":           "decoration:blur:passes",
-	}
-
-	hyprKey, ok := mapping[key]
-	if !ok {
-		hyprKey = key
-	}
+	hyprKey := mapHyprConfigKey(key)
 
 	if h.supportsLuaDispatchers() {
 		table, err := hyprKeyToLuaTable(hyprKey, value)

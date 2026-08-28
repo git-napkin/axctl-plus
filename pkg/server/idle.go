@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"axctl/pkg/ipc"
 	"axctl/pkg/ipc/wayland/client"
 	"axctl/pkg/ipc/wayland/ext_idle_notify_v1"
 	"axctl/pkg/ipc/wayland/idle_inhibit_v1"
@@ -23,7 +23,7 @@ type IdleManager struct {
 	inhibitorMgr *idle_inhibit_v1.ZwpIdleInhibitManagerV1
 
 	mu   sync.Mutex
-	wlMu sync.Mutex // Protects Wayland socket writes
+	wlMu sync.Mutex
 
 	legacyInhibitorID uint32
 
@@ -292,16 +292,11 @@ func (im *IdleManager) isIdleInternal(timeoutMs uint32, inputOnly bool) (bool, e
 		return false, err
 	}
 
-	// ALWAYS set the handler BEFORE unlocking wlMu, because the background
-	// dispatcher might receive the event immediately!
+	// Set the handler before unlocking wlMu; the dispatcher may fire immediately.
 	notif.SetIdledHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1IdledEvent) {
 		isIdle = true
 	})
-	notif.SetResumedHandler(func(e ext_idle_notify_v1.ExtIdleNotificationV1ResumedEvent) {
-	})
 
-	// To avoid blocking forever if something goes wrong with Wayland sync
-	// we will use a timeout fallback. But normally Sync is instant.
 	callback, err := im.display.Sync()
 	if err != nil {
 		notif.Destroy()
@@ -313,14 +308,9 @@ func (im *IdleManager) isIdleInternal(timeoutMs uint32, inputOnly bool) (bool, e
 	})
 	im.wlMu.Unlock()
 
-	// Wait for the sync callback to finish, or timeout if it deadlocks
-	// The background dispatch loop handles events. It will close 'done' when Sync finishes.
-	// If the socket was closed, the background loop might exit WITHOUT dispatching our callback!
 	select {
 	case <-done:
-		// Normal completion
 	case <-time.After(2 * time.Second):
-		// Timeout - the compositor is unresponsive or connection died
 		return false, fmt.Errorf("timeout waiting for idle sync callback")
 	}
 
@@ -719,16 +709,12 @@ func (im *IdleManager) IsSystemInhibited() bool {
 	return im.systemInhibitor.enabled
 }
 
-// MediaInhibitorCheck checks for active audio/sink-inputs via PulseAudio/PipeWire.
-// Returns a map with media info and count of active media streams.
-func (im *IdleManager) MediaInhibitorCheck() (map[string]interface{}, error) {
-	result := make(map[string]interface{})
-
+func MediaInhibitorCheck() (map[string]interface{}, error) {
 	count, apps := checkMediaApps()
-	result["count"] = count
-	result["apps"] = apps
-
-	return result, nil
+	return map[string]interface{}{
+		"count": count,
+		"apps":  apps,
+	}, nil
 }
 
 func checkMediaApps() (int, []string) {
@@ -858,169 +844,84 @@ func extractAppName(block string) string {
 	return ""
 }
 
-func (im *IdleManager) AppInhibitorCheck(patterns []string) (map[string]bool, error) {
-	result := make(map[string]bool)
-
-	if len(patterns) == 0 {
-		patterns = []string{"vlc", "mpv", "firefox", "chromium", "chrome", "brave", "vivaldi", "steam"}
-	}
-
-	if os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") != "" {
-		count, apps := checkHyprlandApps(patterns)
-		for _, app := range apps {
-			result[app] = true
-		}
-		if count > 0 {
-			return result, nil
-		}
-	}
-
-	if os.Getenv("NIRI_SOCKET") != "" || os.Getenv("XDG_CURRENT_DESKTOP") == "niri" {
-		count, apps := checkNiriApps(patterns)
-		for _, app := range apps {
-			result[app] = true
-		}
-		if count > 0 {
-			return result, nil
-		}
-	}
-
-	count, apps := checkProcApps(patterns)
-	for _, app := range apps {
-		result[app] = true
-	}
-	if count > 0 {
-		return result, nil
-	}
-
-	return result, nil
+var defaultAppInhibitPatterns = []string{
+	"vlc", "mpv", "firefox", "chromium", "chrome", "brave", "vivaldi", "steam",
 }
 
-func checkHyprlandApps(patterns []string) (int, []string) {
-	cmd := exec.Command("hyprctl", "clients", "-j")
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, nil
+func AppInhibitorCheck(windows []ipc.Window, patterns []string) map[string]bool {
+	if len(patterns) == 0 {
+		patterns = defaultAppInhibitPatterns
 	}
 
-	var windows []struct {
-		Class string `json:"class"`
+	result := matchAppPatterns(windows, patterns)
+	if len(result) > 0 {
+		return result
 	}
-	if err := json.Unmarshal(out, &windows); err != nil {
-		return 0, nil
+
+	for _, app := range checkProcApps(patterns) {
+		result[app] = true
+	}
+	return result
+}
+
+func matchAppPatterns(windows []ipc.Window, patterns []string) map[string]bool {
+	result := make(map[string]bool)
+	lowered := make([]string, len(patterns))
+	for i, p := range patterns {
+		lowered[i] = strings.ToLower(p)
+	}
+
+	for _, w := range windows {
+		if w.AppID == "" {
+			continue
+		}
+		lc := strings.ToLower(w.AppID)
+		for _, p := range lowered {
+			if strings.Contains(lc, p) {
+				result[w.AppID] = true
+				break
+			}
+		}
+	}
+	return result
+}
+
+func checkProcApps(patterns []string) []string {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+
+	lowered := make([]string, len(patterns))
+	for i, p := range patterns {
+		lowered[i] = strings.ToLower(p)
 	}
 
 	var matches []string
 	seen := make(map[string]bool)
-	for _, w := range windows {
-		if w.Class == "" {
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		lcClass := toLower(w.Class)
-		for _, p := range patterns {
-			if stringsContains(lcClass, toLower(p)) {
-				if !seen[w.Class] {
-					seen[w.Class] = true
-					matches = append(matches, w.Class)
+		name := e.Name()
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		comm, err := os.ReadFile("/proc/" + name + "/comm")
+		if err != nil {
+			continue
+		}
+		commStr := strings.TrimSpace(string(comm))
+		lc := strings.ToLower(commStr)
+		for _, p := range lowered {
+			if strings.Contains(lc, p) {
+				if !seen[commStr] {
+					seen[commStr] = true
+					matches = append(matches, commStr)
 				}
 				break
 			}
 		}
 	}
-
-	return len(matches), matches
-}
-
-// checkNiriApps checks app patterns against Niri windows using niri msg
-func checkNiriApps(patterns []string) (int, []string) {
-	cmd := exec.Command("niri", "msg", "windows")
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, nil
-	}
-
-	text := string(out)
-	var matches []string
-	seen := make(map[string]bool)
-
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "  App ID: ") {
-			appID := strings.Trim(strings.TrimPrefix(line, "  App ID: "), `"`)
-			if appID == "" {
-				continue
-			}
-			lcAppID := toLower(appID)
-			for _, p := range patterns {
-				if stringsContains(lcAppID, toLower(p)) {
-					if !seen[appID] {
-						seen[appID] = true
-						matches = append(matches, appID)
-					}
-					break
-				}
-			}
-		}
-	}
-
-	return len(matches), matches
-}
-
-// checkProcApps checks app patterns against running processes via /proc
-func checkProcApps(patterns []string) (int, []string) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return 0, nil
-	}
-
-	var matches []string
-	seen := make(map[string]bool)
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-
-		// Check if it's a PID (numeric directory)
-		name := e.Name()
-		if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
-			// Try to read comm and exe
-			commPath := "/proc/" + name + "/comm"
-			if comm, err := os.ReadFile(commPath); err == nil {
-				commStr := strings.TrimSpace(string(comm))
-				lcComm := toLower(commStr)
-				for _, p := range patterns {
-					if stringsContains(lcComm, toLower(p)) {
-						if !seen[commStr] {
-							seen[commStr] = true
-							matches = append(matches, commStr)
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return len(matches), matches
-}
-
-// Helper functions
-func toLower(s string) string {
-	var result []byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		result = append(result, c)
-	}
-	return string(result)
-}
-
-func stringsContains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) &&
-		(len(needle) == 0 ||
-			strings.Contains(haystack, needle) ||
-			strings.HasPrefix(haystack, needle) ||
-			strings.HasSuffix(haystack, needle))
+	return matches
 }

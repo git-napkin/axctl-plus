@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -61,15 +62,10 @@ func (n *Niri) request(req interface{}, resp interface{}) error {
 }
 
 func (n *Niri) parseWindowID(id string) (int, error) {
-	var idInt int
-	if _, err := fmt.Sscanf(id, "%d", &idInt); err != nil {
-		return 0, err
-	}
-	return idInt, nil
+	return strconv.Atoi(id)
 }
 
 func (n *Niri) ListWindows() ([]ipc.Window, error) {
-	// First get workspace->output mapping for MonitorID resolution
 	workspaces, _ := n.ListWorkspaces()
 	wsOutputMap := make(map[string]string)
 	for _, ws := range workspaces {
@@ -240,7 +236,6 @@ func (n *Niri) ToggleFloating(id string) error {
 }
 
 func (n *Niri) SetFullscreen(id string, state bool) error {
-	// Check current state before toggling (like Hyprland does)
 	windows, err := n.ListWindows()
 	if err != nil {
 		return err
@@ -259,7 +254,6 @@ func (n *Niri) SetFullscreen(id string, state bool) error {
 		}
 	}
 
-	// Already in requested state, nothing to do
 	if isFs == state {
 		return nil
 	}
@@ -374,8 +368,7 @@ func (n *Niri) ActiveWorkspace() (*ipc.Workspace, error) {
 }
 
 func (n *Niri) SwitchWorkspace(id string) error {
-	var idInt int
-	if _, err := fmt.Sscanf(id, "%d", &idInt); err == nil {
+	if idInt, err := strconv.Atoi(id); err == nil {
 		return n.request(map[string]interface{}{
 			"Action": map[string]interface{}{
 				"FocusWorkspace": map[string]interface{}{
@@ -396,8 +389,7 @@ func (n *Niri) SwitchWorkspace(id string) error {
 func (n *Niri) MoveToWorkspace(windowID, workspaceID string) error {
 	args := map[string]interface{}{}
 
-	var wsIDInt int
-	if _, err := fmt.Sscanf(workspaceID, "%d", &wsIDInt); err == nil {
+	if wsIDInt, err := strconv.Atoi(workspaceID); err == nil {
 		args["reference"] = map[string]interface{}{"Id": wsIDInt}
 	} else {
 		args["reference"] = map[string]interface{}{"Name": workspaceID}
@@ -765,13 +757,9 @@ func (n *Niri) SwitchKeyboardLayout(action string) error {
 	var layoutArg interface{} = "Next"
 	if action == "prev" {
 		layoutArg = "Prev"
-	} else if action != "next" {
-		var idx int
-		if _, err := fmt.Sscanf(action, "%d", &idx); err == nil {
-			layoutArg = idx
-		}
+	} else if idx, err := strconv.Atoi(action); err == nil {
+		layoutArg = idx
 	}
-	// For Niri, it's either "Next", "Prev", or integer index
 	req := map[string]interface{}{
 		"Action": map[string]interface{}{"SwitchLayout": layoutArg},
 	}

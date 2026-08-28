@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// UnmarshalJSON handles both nested and flat "gaps.inner" style JSON seamlessly
 func (c *ConfigAppearance) UnmarshalJSON(data []byte) error {
 	type Alias ConfigAppearance
 	aux := &struct {
@@ -13,13 +12,11 @@ func (c *ConfigAppearance) UnmarshalJSON(data []byte) error {
 	}{
 		Alias: (*Alias)(c),
 	}
-	
-	// First try standard nested unmarshalling
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
-	// Then also unmarshal as a flat map to catch dot notation keys
 	var flat map[string]interface{}
 	if err := json.Unmarshal(data, &flat); err == nil {
 		c.applyFlatKeys(flat)
@@ -33,7 +30,7 @@ func (c *ConfigAppearance) applyFlatKeys(flat map[string]interface{}) {
 		valF, isFloat := v.(float64)
 		valS, isStr := v.(string)
 		valB, isBool := v.(bool)
-		
+
 		valI := int(valF)
 
 		if strings.Contains(k, ".") {
@@ -106,15 +103,12 @@ func (c *ConfigAppearance) applyFlatKeys(flat map[string]interface{}) {
 					}
 				}
 			}
-		} else {
-			// Single level flat like "rounding"
-			if k == "rounding" && isFloat {
-				if c.Border == nil {
-					c.Border = &Border{}
-				}
-				vCopy := valI
-				c.Border.Rounding = &vCopy
+		} else if k == "rounding" && isFloat {
+			if c.Border == nil {
+				c.Border = &Border{}
 			}
+			vCopy := valI
+			c.Border.Rounding = &vCopy
 		}
 	}
 }

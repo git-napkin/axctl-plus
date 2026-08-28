@@ -529,9 +529,9 @@ func (m *Mango) setupToplevelHandlers() {
 			}
 			winID := fmt.Sprintf("%d", hid)
 			w := ipc.Window{
-				ID:           winID,
-				Title:        info.title,
-				AppID:        info.appId,
+				ID:    winID,
+				Title: info.title,
+				AppID: info.appId,
 				Metadata: map[string]interface{}{
 					"monitor_id": info.outputName,
 				},
@@ -594,7 +594,7 @@ func (m *Mango) ListWindows() ([]ipc.Window, error) {
 				continue
 			}
 			// Update cached workspace ID only if it doesn't have one yet (newly created)
-			// Because of race conditions between wlr-foreign-toplevel and dwl-ipc, we CANNOT trust info.activated 
+			// Because of race conditions between wlr-foreign-toplevel and dwl-ipc, we CANNOT trust info.activated
 			// during workspace switches. If we update it here, it might grab the newly switched tag instead of its own!
 			if info.cachedWsID == "" {
 				for _, out := range m.outputs {
@@ -657,7 +657,7 @@ func (m *Mango) ListWindows() ([]ipc.Window, error) {
 			},
 		}
 		windows = append(windows, w)
-		
+
 		// Update cache, but preserve historical WorkspaceID if it's inactive?
 		// No, if it's in out.appid, it IS the active window for this output.
 		// So we SHOULD update its WorkspaceID to wsID because it's actively focused here!
@@ -1176,11 +1176,10 @@ func (m *Mango) SwitchKeyboardLayout(action string) error {
 		return ipc.ErrCompositorNotAvailable
 	}
 
-	arg := "0" // Default to next
+	arg := "0"
 	if action != "next" && action != "prev" {
-		var idx int
-		if _, err := fmt.Sscanf(action, "%d", &idx); err == nil {
-			arg = fmt.Sprintf("%d", idx+1) // mango uses 1-based index
+		if idx, err := strconv.Atoi(action); err == nil {
+			arg = strconv.Itoa(idx + 1)
 		}
 	}
 	return ipcOut.DispatchCmd("switch_keyboard_layout", arg, "", "", "", "")
