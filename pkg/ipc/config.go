@@ -35,6 +35,11 @@ type Shadow struct {
 
 type Animations struct {
 	Enabled *bool `json:"enabled,omitempty"`
+	// WorkspaceStyle overrides the default "slidefade 20%" used for
+	// the workspaces animation in generated hyprland.{lua,conf}.
+	// Ambxst[+] sets this from bar orientation: left/right bar uses
+	// "slidefadevert 20%", otherwise "slidefade 20%".
+	WorkspaceStyle *string `json:"workspaceStyle,omitempty"`
 }
 
 type ConfigAppearance struct {

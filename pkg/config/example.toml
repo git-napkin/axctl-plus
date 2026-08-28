@@ -42,6 +42,9 @@
 
   [appearance.animations]
   enabled = true
+  # Optional. Overrides the default "slidefade 20%" workspace animation.
+  # Ambxst[+] writes "slidefadevert 20%" for a left/right bar.
+  # workspace_style = "slidefade 20%"
 
 # ─── Input ────────────────────────────────────────────────────────────
 

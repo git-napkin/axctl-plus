@@ -30,7 +30,15 @@ func DefaultConfigPath() string {
 	if err != nil {
 		return primaryPath
 	}
-	return filepath.Join(home, ".local", "share", "ambxst", "axctl.toml")
+	plusPath := filepath.Join(home, ".local", "share", "ambxst+", "axctl.toml")
+	if _, err := os.Stat(plusPath); err == nil {
+		return plusPath
+	}
+	legacyPath := filepath.Join(home, ".local", "share", "ambxst", "axctl.toml")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return plusPath
 }
 
 // LoadConfig loads and merges a TOML configuration file, resolving imports.
@@ -314,6 +322,9 @@ func mergeAppearance(dst, src *AppearanceConfig) {
 		}
 		if src.Animations.Enabled != nil {
 			dst.Animations.Enabled = src.Animations.Enabled
+		}
+		if src.Animations.WorkspaceStyle != nil {
+			dst.Animations.WorkspaceStyle = src.Animations.WorkspaceStyle
 		}
 	}
 }

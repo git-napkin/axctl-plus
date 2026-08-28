@@ -137,11 +137,15 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 		b.WriteString("})\n\n")
 
 		if *config.Animations.Enabled {
+			workspaceStyle := "slidefade 20%"
+			if config.Animations.WorkspaceStyle != nil && *config.Animations.WorkspaceStyle != "" {
+				workspaceStyle = *config.Animations.WorkspaceStyle
+			}
 			b.WriteString("hl.curve(\"myBezier\", { type = \"bezier\", points = { {0.4, 0.0}, {0.2, 1.0} } })\n\n")
 			b.WriteString("hl.animation({ leaf = \"windows\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = \"popin 80%\" })\n")
 			b.WriteString("hl.animation({ leaf = \"border\", enabled = true, speed = 2.5, bezier = \"myBezier\" })\n")
 			b.WriteString("hl.animation({ leaf = \"fade\", enabled = true, speed = 2.5, bezier = \"myBezier\" })\n")
-			b.WriteString("hl.animation({ leaf = \"workspaces\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = \"slidefade 20%\" })\n")
+			b.WriteString(fmt.Sprintf("hl.animation({ leaf = \"workspaces\", enabled = true, speed = 2.5, bezier = \"myBezier\", style = %q })\n", workspaceStyle))
 		}
 	}
 
@@ -279,14 +283,29 @@ func dispatcherToLua(dispatcher, arg string) string {
 		}
 		return "hl.dsp.window.fullscreen()"
 	case "movefocus":
+		// In monocle, spatial direction is meaningless (only one window
+		// is visible). Cycle the stack instead so SUPER+Arrow still
+		// works. Scrolling uses the generic dispatcher: layoutmsg focus
+		// never crosses monitors, while moveFocus falls back to the
+		// neighbor monitor.
+		cycle := "cyclenext"
+		if arg == "d" || arg == "l" {
+			cycle = "cycleprev"
+		}
 		return fmt.Sprintf(
-			"function() if hl.get_active_workspace().tiled_layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
-			"focus "+arg, arg)
+			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
+			cycle, arg)
 	case "movewindow":
 		if arg == "" {
 			return "hl.dsp.window.drag()"
 		}
-		return fmt.Sprintf("hl.dsp.window.move({ direction = %q })", arg)
+		cycle := "cyclenext"
+		if arg == "d" || arg == "l" {
+			cycle = "cycleprev"
+		}
+		return fmt.Sprintf(
+			"function() local layout = hl.get_active_workspace().tiled_layout; if layout == \"monocle\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.window.move({ direction = %q })) end end",
+			cycle, arg)
 	case "resizewindow":
 		if arg == "" {
 			return "hl.dsp.window.resize()"

@@ -63,7 +63,8 @@ type ShadowConfig struct {
 }
 
 type AnimationsConfig struct {
-	Enabled *bool `toml:"enabled,omitempty"`
+	Enabled        *bool   `toml:"enabled,omitempty"`
+	WorkspaceStyle *string `toml:"workspace_style,omitempty"`
 }
 
 type InputConfig struct {
@@ -252,7 +253,8 @@ func (a *AppearanceConfig) toIPC() ipc.ConfigAppearance {
 	}
 	if a.Animations != nil {
 		cfg.Animations = &ipc.Animations{
-			Enabled: a.Animations.Enabled,
+			Enabled:        a.Animations.Enabled,
+			WorkspaceStyle: a.Animations.WorkspaceStyle,
 		}
 	}
 

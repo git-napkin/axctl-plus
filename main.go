@@ -55,7 +55,7 @@ func main() {
 		runDaemon(customConfigPath)
 	case "subscribe":
 		runSubscribe()
-	case "window", "workspace", "monitor", "layout", "config", "system":
+	case "window", "workspace", "monitor", "layout", "config", "system", "darkmode":
 		if len(remainingArgs) < 2 {
 			usage()
 			return
@@ -158,6 +158,11 @@ func usage() {
 	fmt.Println("    media-inhibit-check   Check for active audio/media (PulseAudio/PipeWire)")
 	fmt.Println("    get-capabilities        Get compositor capabilities")
 	fmt.Println("    exit                    Exit compositor")
+	fmt.Println("\n  darkmode <action>")
+	fmt.Println("    on                      Set system color-scheme to prefer-dark")
+	fmt.Println("    off                     Set system color-scheme to prefer-light")
+	fmt.Println("    toggle                  Toggle dark/light color-scheme")
+	fmt.Println("    status                  Show current color-scheme state")
 }
 
 func daemonSocketPath() string {
