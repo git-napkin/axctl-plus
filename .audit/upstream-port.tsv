@@ -1,0 +1,9 @@
+ts	phase	decision	why	evidence	result
+2026-08-28T02:32:46Z	frame	skip mango/niri rewrite and PathsForCompositor hypr defaults	plus is Hyprland-first and already writes ~/.local/share/ambxst+/hyprland.conf; upstream defaults to ~/.config/hypr/axctl.generated.conf	/tmp/axctl-compare/axctl/pkg/server/paths.go vs plus config_handler.go	skipped
+2026-08-28T02:32:46Z	units	port darkmode CLI and RPC	Ambxst[+] GtkGenerator already calls axctl darkmode	pkg/server/darkmode.go main.go pkg/server/server.go	VERIFIED
+2026-08-28T02:32:46Z	units	port workspace_style through TOML IPC generators	Ambxst[+] CompositorTomlWriter already writes workspace_style; plus generators ignored it	pkg/ipc/config.go pkg/config/types.go pkg/ipc/hyprland/generator.go generator_lua.go	VERIFIED
+2026-08-28T02:32:47Z	units	default fallback config path is ambxst+ not ambxst	plus daemon without -c would load the wrong tree	pkg/config/loader.go pkg/config/loader_test.go	VERIFIED
+2026-08-28T02:32:47Z	units	movefocus Lua uses generic dispatcher plus monocle cycle	scrolling layoutmsg never crosses monitors	pkg/ipc/hyprland/generator_lua.go generator_lua_test.go	VERIFIED
+2026-08-28T02:32:47Z	refine	LookPath gsettings before darkmode get/set	clearer error than a failed exec when gsettings is missing	pkg/server/darkmode.go	landed
+2026-08-28T02:32:47Z	verify	go test ./... and axctl usage lists darkmode	predicate encoded as unittest plus CLI help grep	go test ./...	VERIFIED
+2026-08-28T02:34:03Z	refine	DefaultConfigPath prefers ambxst+ then legacy ambxst	reviewer flagged dropping ~/.local/share/ambxst/axctl.toml for daemons without -c	pkg/config/loader.go pkg/config/loader_test.go	VERIFIED
