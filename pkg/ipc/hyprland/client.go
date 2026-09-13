@@ -36,6 +36,31 @@ func (h *Hyprland) getSocketPath(socketName string) string {
 	return fmt.Sprintf("%s/hypr/%s/%s", runtimeDir, h.signature, socketName)
 }
 
+// hyprWorkspaceRef is the workspace object Hyprland embeds in clients /
+// monitors / workspace list JSON. Pre-0.56 exposed a numeric "id"; 0.56+
+// replaced it with address + type + name (no "id"). Prefer the legacy id when
+// present, otherwise fall back to name (what monitors still use for
+// active_workspace) and finally address.
+type hyprWorkspaceRef struct {
+	ID      int    `json:"id"`
+	Address string `json:"address"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+}
+
+func (w hyprWorkspaceRef) idString() string {
+	if w.ID != 0 {
+		return strconv.Itoa(w.ID)
+	}
+	if w.Name != "" {
+		return w.Name
+	}
+	if w.Address != "" {
+		return w.Address
+	}
+	return "0"
+}
+
 func (h *Hyprland) dispatch(cmd string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -228,19 +253,17 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 	}
 
 	var clients []struct {
-		Address    string `json:"address"`
-		Title      string `json:"title"`
-		Class      string `json:"class"`
-		Floating   bool   `json:"floating"`
-		Fullscreen int    `json:"fullscreen"`
-		Pinned     bool   `json:"pinned"`
-		Monitor    int    `json:"monitor"`
-		Urgent     bool   `json:"urgent"`
-		At         []int  `json:"at"`
-		Size       []int  `json:"size"`
-		Workspace  struct {
-			ID int `json:"id"`
-		} `json:"workspace"`
+		Address    string           `json:"address"`
+		Title      string           `json:"title"`
+		Class      string           `json:"class"`
+		Floating   bool             `json:"floating"`
+		Fullscreen int              `json:"fullscreen"`
+		Pinned     bool             `json:"pinned"`
+		Monitor    int              `json:"monitor"`
+		Urgent     bool             `json:"urgent"`
+		At         []int            `json:"at"`
+		Size       []int            `json:"size"`
+		Workspace  hyprWorkspaceRef `json:"workspace"`
 	}
 
 	if err := json.Unmarshal([]byte(resp), &clients); err != nil {
@@ -265,7 +288,7 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 			ID:           c.Address,
 			Title:        c.Title,
 			AppID:        c.Class,
-			WorkspaceID:  fmt.Sprintf("%d", c.Workspace.ID),
+			WorkspaceID:  c.Workspace.idString(),
 			IsUrgent:     c.Urgent,
 			IsFloating:   c.Floating,
 			IsFullscreen: c.Fullscreen == 2,
@@ -431,8 +454,7 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 	}
 
 	var workspaces []struct {
-		ID      int    `json:"id"`
-		Name    string `json:"name"`
+		hyprWorkspaceRef
 		Monitor string `json:"monitor"`
 	}
 
@@ -441,22 +463,22 @@ func (h *Hyprland) ListWorkspaces() ([]ipc.Workspace, error) {
 	}
 
 	activeResp, _ := h.dispatch("j/activeworkspace")
-	var activeWS struct {
-		ID int `json:"id"`
-	}
+	var activeWS hyprWorkspaceRef
 	if activeResp != "" {
 		json.Unmarshal([]byte(activeResp), &activeWS)
 	}
+	activeID := activeWS.idString()
 
 	res := make([]ipc.Workspace, len(workspaces))
 	for i, w := range workspaces {
+		id := w.idString()
 		res[i] = ipc.Workspace{
-			ID:        fmt.Sprintf("%d", w.ID),
+			ID:        id,
 			Name:      w.Name,
 			MonitorID: w.Monitor,
-			IsActive:  w.ID == activeWS.ID,
+			IsActive:  id == activeID,
 			Metadata: map[string]interface{}{
-				"focused": w.ID == activeWS.ID,
+				"focused": id == activeID,
 			},
 		}
 	}
@@ -469,15 +491,14 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 		return nil, err
 	}
 	var ws struct {
-		ID      int    `json:"id"`
-		Name    string `json:"name"`
+		hyprWorkspaceRef
 		Monitor string `json:"monitor"`
 	}
 	if err := json.Unmarshal([]byte(resp), &ws); err != nil {
 		return nil, err
 	}
 	return &ipc.Workspace{
-		ID:        fmt.Sprintf("%d", ws.ID),
+		ID:        ws.idString(),
 		Name:      ws.Name,
 		MonitorID: ws.Monitor,
 		IsActive:  true,

@@ -9,6 +9,27 @@ import (
 	"testing"
 )
 
+func TestHyprWorkspaceRefIDString(t *testing.T) {
+	tests := []struct {
+		name string
+		ws   hyprWorkspaceRef
+		want string
+	}{
+		{name: "legacy numeric id", ws: hyprWorkspaceRef{ID: 4, Name: "4"}, want: "4"},
+		{name: "hyprland 0.56 address name only", ws: hyprWorkspaceRef{Address: "3", Type: "numbered", Name: "3"}, want: "3"},
+		{name: "name preferred over address", ws: hyprWorkspaceRef{Address: "0xabc", Name: "special:magic"}, want: "special:magic"},
+		{name: "address fallback", ws: hyprWorkspaceRef{Address: "9"}, want: "9"},
+		{name: "empty", ws: hyprWorkspaceRef{}, want: "0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ws.idString(); got != tt.want {
+				t.Fatalf("idString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseHyprlandVersion(t *testing.T) {
 	tests := []struct {
 		name string
