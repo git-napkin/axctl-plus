@@ -111,7 +111,16 @@ type LayerRuleConfig struct {
 	NoShadow         *bool    `toml:"no_shadow,omitempty"`
 	IgnoreZeroAlpha  *bool    `toml:"ignore_zero_alpha,omitempty"`
 	IgnoreAlphaValue *float64 `toml:"ignore_alpha_value,omitempty"`
+	NoScreenShare    *bool    `toml:"no_screen_share,omitempty"`
+	Noscreenshare    *bool    `toml:"noscreenshare,omitempty"`
 	Namespace        string   `toml:"namespace"`
+}
+
+func (lr LayerRuleConfig) noScreenShare() *bool {
+	if lr.NoScreenShare != nil {
+		return lr.NoScreenShare
+	}
+	return lr.Noscreenshare
 }
 
 // ToIPCConfig converts the TOML configuration to the IPC ConfigUniversal type.
@@ -164,6 +173,7 @@ func (c *TOMLConfig) ToIPCConfig() ipc.ConfigUniversal {
 			NoShadow:         lr.NoShadow,
 			IgnoreZeroAlpha:  lr.IgnoreZeroAlpha,
 			IgnoreAlphaValue: lr.IgnoreAlphaValue,
+			NoScreenShare:    lr.noScreenShare(),
 			Namespace:        lr.Namespace,
 		})
 	}

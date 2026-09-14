@@ -2,6 +2,7 @@ package hyprland
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"axctl/pkg/ipc"
@@ -349,6 +350,27 @@ func dispatcherToLua(dispatcher, arg string) string {
 		return fmt.Sprintf("hl.dsp.window.resize({ %s })", arg)
 	case "movewindowpixel":
 		return fmt.Sprintf("hl.dsp.window.move({ %s })", arg)
+	case "movecursor":
+		fields := strings.Fields(arg)
+		if len(fields) >= 2 {
+			return fmt.Sprintf("hl.dsp.cursor.move({ x = %s, y = %s })", fields[0], fields[1])
+		}
+		return "hl.dsp.cursor.move()"
+	case "sendshortcut":
+		parts := strings.Split(arg, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		if len(parts) >= 3 {
+			return fmt.Sprintf("hl.dsp.send_shortcut({ mods = %q, key = %q, window = %q })", parts[0], parts[1], parts[2])
+		}
+		if len(parts) == 2 {
+			return fmt.Sprintf("hl.dsp.send_shortcut({ key = %q, window = %q })", parts[0], parts[1])
+		}
+		if len(parts) == 1 && parts[0] != "" {
+			return fmt.Sprintf("hl.dsp.send_shortcut({ key = %q })", parts[0])
+		}
+		return "hl.dsp.send_shortcut()"
 	case "pseudo":
 		return "hl.dsp.window.pseudo()"
 	case "centerwindow":
@@ -455,7 +477,10 @@ func (g *LuaGenerator) GenerateLayerRulesLua(rules []ipc.LayerRule) string {
 		if r.NoShadow != nil && *r.NoShadow {
 			b.WriteString("    no_shadow = true,\n")
 		}
-		b.WriteString(fmt.Sprintf("    match = { namespace = %q },\n", r.Namespace))
+		if r.NoScreenShare != nil && *r.NoScreenShare {
+			b.WriteString("    no_screen_share = true,\n")
+		}
+		b.WriteString(fmt.Sprintf("    match = { namespace = %q },\n", regexp.QuoteMeta(r.Namespace)))
 		b.WriteString("})\n\n")
 	}
 

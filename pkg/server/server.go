@@ -555,6 +555,27 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if err == nil {
 				result = map[string]int{"x": x, "y": y}
 			}
+		case "System.MoveCursor":
+			var p struct {
+				X int `json:"x"`
+				Y int `json:"y"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.compositor.MoveCursor(p.X, p.Y)
+		case "System.SendShortcut":
+			var p struct {
+				Mods   string `json:"mods"`
+				Key    string `json:"key"`
+				Window string `json:"window"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				resp.Error = fmt.Sprintf("invalid params: %v", err)
+				break
+			}
+			err = s.compositor.SendShortcut(p.Mods, p.Key, p.Window)
 		case "System.IdleInhibit":
 			if !s.requireIdle(&resp) {
 				break

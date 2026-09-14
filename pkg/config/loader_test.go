@@ -96,3 +96,20 @@ func TestToIPCConfigPassesWorkspaceStyle(t *testing.T) {
 		t.Fatalf("WorkspaceStyle = %v, want %q", got, style)
 	}
 }
+
+func TestToIPCConfigLayerNoScreenShareAlias(t *testing.T) {
+	on := true
+	cfg := &TOMLConfig{
+		LayerRules: []LayerRuleConfig{
+			{Namespace: "ambxst+:computer-use", Noscreenshare: &on},
+		},
+	}
+	ipcCfg := cfg.ToIPCConfig()
+	if len(ipcCfg.LayerRules) != 1 {
+		t.Fatalf("LayerRules len = %d, want 1", len(ipcCfg.LayerRules))
+	}
+	flag := ipcCfg.LayerRules[0].NoScreenShare
+	if flag == nil || !*flag {
+		t.Fatalf("NoScreenShare = %v, want true from noscreenshare alias", flag)
+	}
+}

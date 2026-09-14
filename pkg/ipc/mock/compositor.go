@@ -285,6 +285,14 @@ func (c *Compositor) GetCursorPosition() (int, int, error) {
 	return 0, 0, nil
 }
 
+func (c *Compositor) MoveCursor(x, y int) error {
+	return nil
+}
+
+func (c *Compositor) SendShortcut(mods, key, window string) error {
+	return nil
+}
+
 func (c *Compositor) BindKey(mods, key, command string) error {
 	return nil
 }

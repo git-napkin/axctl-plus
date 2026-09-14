@@ -563,6 +563,14 @@ func (n *Niri) GetCursorPosition() (int, int, error) {
 	return 0, 0, ipc.ErrNotSupported
 }
 
+func (n *Niri) MoveCursor(x, y int) error {
+	return ipc.ErrNotSupported
+}
+
+func (n *Niri) SendShortcut(mods, key, window string) error {
+	return ipc.ErrNotSupported
+}
+
 func (n *Niri) BindKey(mods, key, command string) error {
 	return ipc.ErrNotSupported
 }

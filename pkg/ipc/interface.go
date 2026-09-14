@@ -43,6 +43,8 @@ type Compositor interface {
 	ReloadConfig() error
 	GetAnimations() (interface{}, error)
 	GetCursorPosition() (int, int, error)
+	MoveCursor(x, y int) error
+	SendShortcut(mods, key, window string) error
 
 	BindKey(mods, key, command string) error
 	UnbindKey(mods, key string) error

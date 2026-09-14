@@ -261,6 +261,8 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		Pinned     bool             `json:"pinned"`
 		Monitor    int              `json:"monitor"`
 		Urgent     bool             `json:"urgent"`
+		Pid        int              `json:"pid"`
+		XWayland   bool             `json:"xwayland"`
 		At         []int            `json:"at"`
 		Size       []int            `json:"size"`
 		Workspace  hyprWorkspaceRef `json:"workspace"`
@@ -275,6 +277,8 @@ func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
 		meta := map[string]interface{}{
 			"monitor_id": fmt.Sprintf("%d", c.Monitor),
 			"pinned":     c.Pinned,
+			"pid":        c.Pid,
+			"xwayland":   c.XWayland,
 		}
 		if len(c.At) >= 2 {
 			meta["x"] = c.At[0]
@@ -789,6 +793,32 @@ func (h *Hyprland) GetCursorPosition() (int, int, error) {
 		return 0, 0, err
 	}
 	return pos.X, pos.Y, nil
+}
+
+func (h *Hyprland) MoveCursor(x, y int) error {
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movecursor %d %d", x, y),
+		fmt.Sprintf("hl.dsp.cursor.move({ x = %d, y = %d })", x, y),
+	)
+	return err
+}
+
+func (h *Hyprland) SendShortcut(mods, key, window string) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("send shortcut requires a key")
+	}
+	target := window
+	if strings.TrimSpace(target) == "" {
+		target = "activewindow"
+	}
+	legacy := fmt.Sprintf("sendshortcut %s,%s", key, target)
+	lua := fmt.Sprintf("hl.dsp.send_shortcut({ key = %q, window = %q })", key, target)
+	if strings.TrimSpace(mods) != "" {
+		legacy = fmt.Sprintf("sendshortcut %s,%s,%s", mods, key, target)
+		lua = fmt.Sprintf("hl.dsp.send_shortcut({ mods = %q, key = %q, window = %q })", mods, key, target)
+	}
+	_, err := h.dispatchVersioned(legacy, lua)
+	return err
 }
 
 func (h *Hyprland) BindKey(mods, key, command string) error {

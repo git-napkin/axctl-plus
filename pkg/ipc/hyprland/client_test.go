@@ -131,6 +131,8 @@ func TestHyprlandLegacyDispatcherCommands(t *testing.T) {
 		{name: "switch workspace", run: func(h *Hyprland) error { return h.SwitchWorkspace("+1") }, want: "dispatch workspace +1"},
 		{name: "toggle special workspace", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("") }, want: "dispatch togglespecialworkspace"},
 		{name: "execute", run: func(h *Hyprland) error { return h.Execute("kitty --class demo") }, want: "dispatch exec kitty --class demo"},
+		{name: "move cursor", run: func(h *Hyprland) error { return h.MoveCursor(12, 34) }, want: "dispatch movecursor 12 34"},
+		{name: "send shortcut", run: func(h *Hyprland) error { return h.SendShortcut("CONTROL", "c", "activewindow") }, want: "dispatch sendshortcut CONTROL,c,activewindow"},
 	}
 
 	for _, tt := range tests {
@@ -169,6 +171,10 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 		{name: "set maximized uses set action", run: func(h *Hyprland) error { return h.SetMaximized("", true) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "set" })`},
 		{name: "unset maximized uses unset action", run: func(h *Hyprland) error { return h.SetMaximized("", false) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "unset" })`},
 		{name: "group nav backwards", run: func(h *Hyprland) error { return h.GroupNav("l") }, want: "dispatch hl.dsp.group.prev()"},
+		{name: "move cursor", run: func(h *Hyprland) error { return h.MoveCursor(12, 34) }, want: "dispatch hl.dsp.cursor.move({ x = 12, y = 34 })"},
+		{name: "send shortcut", run: func(h *Hyprland) error {
+			return h.SendShortcut("CONTROL", "c", "activewindow")
+		}, want: `dispatch hl.dsp.send_shortcut({ mods = "CONTROL", key = "c", window = "activewindow" })`},
 	}
 
 	for _, tt := range tests {

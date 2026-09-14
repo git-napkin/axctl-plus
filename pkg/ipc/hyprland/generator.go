@@ -401,6 +401,9 @@ func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
 		if r.NoShadow != nil && *r.NoShadow {
 			props = append(props, "no_shadow on")
 		}
+		if r.NoScreenShare != nil && *r.NoScreenShare {
+			props = append(props, "no_screen_share on")
+		}
 
 		matchStr := fmt.Sprintf("match:namespace %s", regexp.QuoteMeta(r.Namespace))
 		props = append(props, matchStr)

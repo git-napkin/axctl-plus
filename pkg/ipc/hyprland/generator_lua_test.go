@@ -127,6 +127,31 @@ func TestLuaAppearanceWorkspaceStyleEmptyFallsBack(t *testing.T) {
 	}
 }
 
+func boolPtr(v bool) *bool { return &v }
+
+func TestGenerateLayerRulesQuotesNamespaceAndNoScreenShare(t *testing.T) {
+	on := boolPtr(true)
+	rules := []ipc.LayerRule{{
+		Namespace:     "ambxst+:computer-use",
+		NoAnim:        on,
+		NoScreenShare: on,
+	}}
+	hypr := (&Generator{}).GenerateLayerRules(rules)
+	if !strings.Contains(hypr, "no_screen_share on") {
+		t.Fatalf("hyprlang missing no_screen_share:\n%s", hypr)
+	}
+	if !strings.Contains(hypr, `match:namespace ambxst\+:computer-use`) {
+		t.Fatalf("hyprlang namespace should QuoteMeta plus:\n%s", hypr)
+	}
+	lua := NewLuaGenerator().GenerateLayerRulesLua(rules)
+	if !strings.Contains(lua, "no_screen_share = true") {
+		t.Fatalf("lua missing no_screen_share:\n%s", lua)
+	}
+	if !strings.Contains(lua, `namespace = "ambxst\\+:computer-use"`) {
+		t.Fatalf("lua namespace should QuoteMeta plus:\n%s", lua)
+	}
+}
+
 func TestHyprlangAppearanceWorkspaceStyleOverride(t *testing.T) {
 	gen := &Generator{}
 	vert := "slidefadevert 20%"

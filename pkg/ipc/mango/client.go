@@ -1111,6 +1111,14 @@ func (m *Mango) GetCursorPosition() (int, int, error) {
 	return 0, 0, ipc.ErrNotSupported
 }
 
+func (m *Mango) MoveCursor(x, y int) error {
+	return ipc.ErrNotSupported
+}
+
+func (m *Mango) SendShortcut(mods, key, window string) error {
+	return ipc.ErrNotSupported
+}
+
 func (m *Mango) BindKey(mods, key, command string) error {
 	return ipc.ErrNotSupported
 }

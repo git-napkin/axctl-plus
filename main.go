@@ -134,6 +134,8 @@ func usage() {
 	fmt.Println("\n  system <action> [args]")
 	fmt.Println("    execute <cmd>           Execute command")
 	fmt.Println("    get-cursor-position     Get absolute cursor position")
+	fmt.Println("    move-cursor <x> <y>     Move the compositor cursor")
+	fmt.Println("    send-shortcut <mods> <key> [window] Send a compositor shortcut")
 	fmt.Println("    switch-keyboard-layout [next|prev] Switch keyboard layout")
 	fmt.Println("    set-keyboard-layouts <layouts> [variants] Set keyboard layouts (e.g. \"us,es\" \"altgr-intl,\")")
 	fmt.Println("    idle-inhibit <0|1>      Inhibit or allow idle/sleep")
@@ -469,6 +471,21 @@ func handleRPC(category string, args []string) {
 		if len(args) > 1 {
 			params["command"] = args[1]
 		}
+	case "System.MoveCursor":
+		if len(args) > 2 {
+			params["x"] = parseInt(args[1])
+			params["y"] = parseInt(args[2])
+		}
+	case "System.SendShortcut":
+		if len(args) > 1 {
+			params["mods"] = args[1]
+		}
+		if len(args) > 2 {
+			params["key"] = args[2]
+		}
+		if len(args) > 3 {
+			params["window"] = args[3]
+		}
 	case "System.SwitchKeyboardLayout":
 		if len(args) > 1 {
 			params["action"] = args[1]
@@ -571,8 +588,45 @@ func handleRPC(category string, args []string) {
 		return
 	}
 
+	if method == "System.GetCursorPosition" && printCursorXY(resp.Result) {
+		return
+	}
+
 	out, _ := json.MarshalIndent(resp.Result, "", "  ")
 	fmt.Println(string(out))
+}
+
+func printCursorXY(result interface{}) bool {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	x, okX := jsonNumber(m["x"])
+	y, okY := jsonNumber(m["y"])
+	if !okX || !okY {
+		return false
+	}
+	fmt.Printf("%d,%d\n", x, y)
+	return true
+}
+
+func jsonNumber(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	default:
+		return 0, false
+	}
 }
 
 func parseInt(s string) int {

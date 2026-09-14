@@ -134,6 +134,7 @@ type LayerRule struct {
 	NoShadow         *bool    `json:"no_shadow,omitempty"`
 	IgnoreZeroAlpha  *bool    `json:"ignore_zero_alpha,omitempty"`
 	IgnoreAlphaValue *float64 `json:"ignore_alpha_value,omitempty"`
+	NoScreenShare    *bool    `json:"no_screen_share,omitempty"`
 	Namespace        string   `json:"namespace"`
 }
 
