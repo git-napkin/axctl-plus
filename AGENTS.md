@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
 **Generated:** 2026-03-29T17:00:00Z
-**Commit:** d8b2f0e
-**Branch:** dev
+**Commit:** e232685
+**Branch:** main
 
 ## OVERVIEW
 Universal IPC daemon for Wayland compositors (Hyprland, Niri, Mango) written in Go. Provides a unified JSON-RPC API for window and workspace management.
@@ -77,3 +77,6 @@ go build -o axctl .
 - **Hyprland**: Uses `$HYPRLAND_INSTANCE_SIGNATURE` for socket paths.
 - **Niri**: Uses `$NIRI_SOCKET` for IPC.
 - **Mango**: Uses `/run/user/$UID/mango.sock`.
+- **Remotes**: `origin` is the fork (`git-napkin/axctl-plus`), `upstream` is
+  `Axenide/axctl` (the repo this is forked from); `main` is the only
+  branch — work happens directly on `main`.
