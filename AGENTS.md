@@ -74,6 +74,9 @@ go build -o axctl .
 ```
 
 ## NOTES
+- **Daemon socket**: `$AXCTL_SOCKET`, else `$XDG_RUNTIME_DIR/axctl.sock`, else
+  `/run/user/<uid>/axctl.sock`. Connections are checked with `SO_PEERCRED`
+  (`verifyPeerUID`) so another local user cannot impersonate the daemon.
 - **Hyprland**: Uses `$HYPRLAND_INSTANCE_SIGNATURE` for socket paths.
 - **Niri**: Uses `$NIRI_SOCKET` for IPC.
 - **Mango**: Uses `/run/user/$UID/mango.sock`.
