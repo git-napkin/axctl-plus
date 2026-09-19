@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"sync"
 
@@ -164,21 +163,10 @@ type Response struct {
 	Error  string      `json:"error,omitempty"`
 }
 
+// Start listens on the daemon socket. It is an alias for ListenAndServe so
+// callers cannot skip SO_PEERCRED / 0600 by using the older entrypoint.
 func (s *Server) Start() error {
-	_ = os.Remove(s.socketPath)
-	l, err := net.Listen("unix", s.socketPath)
-	if err != nil {
-		return err
-	}
-	defer l.Close()
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			continue
-		}
-		go s.handleConnection(conn)
-	}
+	return s.ListenAndServe()
 }
 
 func (s *Server) resolveID(id string) (string, error) {
