@@ -31,7 +31,8 @@ func TestDefaultSocketPathRuntimeUserFallback(t *testing.T) {
 	t.Setenv("AXCTL_SOCKET", "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	want := filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "axctl.sock")
-	if got := DefaultSocketPath(); got != want {
+	got := DefaultSocketPath()
+	if got != want {
 		t.Fatalf("DefaultSocketPath() = %q, want %q", got, want)
 	}
 	if strings.HasPrefix(got, "/tmp/") {
