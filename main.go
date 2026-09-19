@@ -1,22 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"net"
 	"os"
-	"os/signal"
 	"runtime/debug"
-	"strconv"
-	"strings"
-	"syscall"
-
-	"axctl/pkg/config"
-	"axctl/pkg/ipc"
-	"axctl/pkg/ipc/hyprland"
-	"axctl/pkg/ipc/mango"
-	"axctl/pkg/ipc/niri"
-	"axctl/pkg/server"
 )
 
 var Version = "dev"
